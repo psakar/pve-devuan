@@ -11,9 +11,11 @@
 #   pve-cluster: its build needs libpve-access-control, which depends on it
 #   pve-network: its build needs pve-firewall, which depends on it
 #
-# Usage: build.sh [--from <step>] [--only <step>] [--install] [--list]
+# Usage: build.sh [--from <step>] [--only <step>] [--keep] [--install] [--list]
 #   --from <step>  start at this step (e.g. to resume after a failure)
 #   --only <step>  build only this step
+#   --keep         keep the build directories; by default a step removes them
+#                  once its packages are in repo/ (a failed step keeps them)
 #   --install      install pve-manager (and so everything) afterwards
 #   --list         list the steps
 #
@@ -35,12 +37,13 @@ STEPS=(
     pve-container pve-manager
 )
 
-FROM='' ONLY='' INSTALL=0
+FROM='' ONLY='' INSTALL=0 KEEP=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) FROM=$2; shift ;;
         --only) ONLY=$2; shift ;;
         --install) INSTALL=1 ;;
+        --keep) KEEP=1 ;;
         --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
         -h|--help) sed -n '3,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
         *) echo "unknown option '$1', see --help" >&2; exit 2 ;;
@@ -164,6 +167,19 @@ repo_build() { # <repo> [env assignments]
     if ! env "$@" "$BUILD_REPO" "$BASE/$repo" | tee -a "$LOG"; then
         die "$repo failed, see build-logs/$repo.log; resume with --from $repo"
     fi
+    # the packages are in repo/ now: remove the build directory and the
+    # copies of the packages (the repositories' clean target)
+    if [ $KEEP = 0 ]; then
+        make -C "$BASE/$repo" clean </dev/null >>"$BASE/build-logs/$repo.log" 2>&1 || true
+    fi
+}
+
+# Remove a build directory in build/ and its packages, which are in repo/ now.
+clean_build_dir() { # <build dir>
+    [ $KEEP = 0 ] || return 0
+    local dir=$1 name version
+    name=$(basename "$dir"); version=${name##*-}; name=${name%-*}
+    rm -rf "$dir" "$BASE"/build/"$name"*_"$version"_*
 }
 
 # Build a package from its prepared build directory: patched debian/rules (no
@@ -210,6 +226,7 @@ step_libpve-rs-perl() {
     cp "$BASE"/build/libpve-rs-perl*_"$version"_*.deb "$R/"
     refresh_repo
     echo "=== libpve-rs-perl: built $version" | tee -a "$LOG"
+    clean_build_dir "$dir"
 }
 
 step_pve-qemu() { repo_build pve-qemu BUILD_PARALLEL="$NPROC"; }
@@ -256,6 +273,7 @@ step_pve-lxc-syscalld() {
     cp "$BASE"/build/pve-lxc-syscalld*_"$version"_*.deb "$R/"
     refresh_repo
     echo "=== pve-lxc-syscalld: built $version" | tee -a "$LOG"
+    clean_build_dir "$dir"
 }
 
 step_pve-ha-manager() { repo_build pve-ha-manager; }
