@@ -30,7 +30,7 @@ LOG=$BASE/build-logs/build.log
 NPROC=$(nproc)
 
 STEPS=(
-    pve-common libpve-rs-perl pve-qemu pve-cluster pve-firewall pve-network
+    libpve-rs-perl pve-common pve-qemu pve-cluster pve-firewall pve-network
     pve-storage ifupdown2 lxc pve-lxc-syscalld pve-ha-manager qemu-server
     pve-container pve-manager
 )
@@ -61,7 +61,24 @@ die() { echo "ERROR: $*" | tee -a "$LOG" >&2; exit 1; }
 
 refresh_repo() {
     "$R/update-index.sh"
-    sudo apt-get update -q >/dev/null 2>&1
+    sudo apt-get update -q >/dev/null || die "apt-get update failed"
+}
+
+# The packages prepare-build.sh fetched from Proxmox into repo/ must be visible
+# to apt, or the builds fail on missing build dependencies.
+check_fetched() {
+    local prepare missing=() p
+    prepare=$(dirname "$(readlink -f "$0")")/prepare-build.sh
+    [ -f "$prepare" ] || die "$prepare missing"
+    mapfile -t fetched < <(bash -c 'f=$1; set --; source "$f" >/dev/null; printf "%s\n" "${PROXMOX_PACKAGES[@]}"' _ "$prepare")
+    [ ${#fetched[@]} -gt 0 ] || die "no package list in $prepare"
+    for p in "${fetched[@]}"; do
+        [ -n "$(apt-cache policy "$p" 2>/dev/null | sed -n 's/^ *Candidate: //p' | grep -v '(none)')" ] || missing+=("$p")
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+        die "not available to apt: ${missing[*]}; run prepare-build.sh again"
+    fi
+    echo "all ${#fetched[@]} packages from Proxmox available" | tee -a "$LOG"
 }
 
 # Dependencies from a control file's build dependencies (or a package's
@@ -157,7 +174,7 @@ cargo_dir_build() { # <name> <build dir> <log name>
     sed -i -e '/prepare-debian .*cargo_registry/d' \
            -e 's|^export CARGO_HOME = .*|# CARGO_HOME: the default (~/.cargo), crates from crates.io|' "$dir/debian/rules"
     echo "=== $(date -Is) building $name in $dir" >>"$log"
-    (cd "$dir" && PATH=/usr/local/bin:/usr/bin:/bin dpkg-buildpackage -b -us -uc -d) >>"$log" 2>&1 \
+    (cd "$dir" && PATH=/usr/local/bin:/usr/bin:/bin dpkg-buildpackage -b -us -uc -d) </dev/null >>"$log" 2>&1 \
         || die "$name failed, see build-logs/$3.log"
 }
 
@@ -165,15 +182,22 @@ step_pve-common() { repo_build pve-common WITH_TESTS=1; }
 
 # libpve-rs-perl, built against the local proxmox-rs (with its Devuan
 # changes), proxmox-ve-rs and perlmod crates instead of the published ones.
+# Built first, without its tests: Proxmox's libproxmox-rs-perl, which
+# pve-common's build needs, depends on libpve-rs-perl, and the tests are the
+# only part of this build that needs libproxmox-rs-perl (its
+# Proxmox::Lib::SslProbe), so the build needs no package from that cycle.
 step_libpve-rs-perl() {
     local src=$BASE/proxmox-perl-rs/pve-rs version dir
     echo perlmod-bin | install_some
-    build_deps "$src/debian/control" "" | install_some '^librust-|^dh-cargo$|^cargo$|^rustc$'
+    build_deps "$src/debian/control" nocheck | install_some '^librust-|^dh-cargo$|^cargo$|^rustc$|^libproxmox-rs-perl$'
     version=$(dpkg-parsechangelog -l "$src/debian/changelog" -S Version)
-    dir=$src/libpve-rs-perl-$version
-    rm -rf "$dir"
-    make -C "$src" "libpve-rs-perl-$version" >>"$BASE/build-logs/proxmox-perl-rs.log" 2>&1 \
+    # built outside the repository: cargo also reads the .cargo/config.toml of
+    # parent directories, and pve-rs/'s points at the Debian crate registry
+    dir=$BASE/build/libpve-rs-perl-$version
+    rm -rf "$dir" "$src/libpve-rs-perl-$version"
+    make -C "$src" "libpve-rs-perl-$version" </dev/null >>"$BASE/build-logs/proxmox-perl-rs.log" 2>&1 \
         || die "preparing the libpve-rs-perl build directory failed"
+    mv "$src/libpve-rs-perl-$version" "$dir"
     {
         echo '[patch.crates-io]'
         for crate_dir in "$BASE"/proxmox-rs/*/ "$BASE"/proxmox-ve-rs/*/ "$BASE"/perlmod/*/; do
@@ -182,8 +206,8 @@ step_libpve-rs-perl() {
             [ -n "$name" ] && echo "$name = { path = \"${crate_dir%/}\" }"
         done
     } > "$dir/.cargo/config.toml"
-    cargo_dir_build libpve-rs-perl "$dir" proxmox-perl-rs
-    cp "$src"/libpve-rs-perl*_"$version"_*.deb "$R/"
+    DEB_BUILD_OPTIONS=nocheck cargo_dir_build libpve-rs-perl "$dir" proxmox-perl-rs
+    cp "$BASE"/build/libpve-rs-perl*_"$version"_*.deb "$R/"
     refresh_repo
     echo "=== libpve-rs-perl: built $version" | tee -a "$LOG"
 }
@@ -223,7 +247,7 @@ step_pve-lxc-syscalld() {
     version=$(dpkg-parsechangelog -l "$src/debian/changelog" -S Version)
     dir=$BASE/build/pve-lxc-syscalld-$version
     rm -rf "$dir" "$src/pve-lxc-syscalld-$version"
-    make -C "$src" "pve-lxc-syscalld-$version" >>"$BASE/build-logs/pve-lxc-syscalld.log" 2>&1 \
+    make -C "$src" "pve-lxc-syscalld-$version" </dev/null >>"$BASE/build-logs/pve-lxc-syscalld.log" 2>&1 \
         || die "preparing the pve-lxc-syscalld build directory failed"
     mv "$src/pve-lxc-syscalld-$version" "$dir"
     rm -rf "$dir/.cargo"
@@ -244,6 +268,10 @@ step_pve-manager() { repo_build pve-manager BUILD_PARALLEL=1; }
 
 # allow sourcing the functions, e.g. for testing
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
+
+info "Checking the local repository"
+refresh_repo
+check_fetched
 
 started=0
 [ -z "$FROM" ] && started=1

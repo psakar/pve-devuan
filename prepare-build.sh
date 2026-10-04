@@ -84,7 +84,13 @@ REFERENCE_DEPS_REPOS=(
 TOOLS=(
     git build-essential devscripts equivs fakeroot lintian apt-utils dpkg-dev
     debhelper meson ninja-build pkgconf curl gpg gpgv
+    rsync  # copies the sources into the build directory (pve-manager, pve-firewall)
+    wget   # pve-manager's 'make update' of the appliance index (aplinfo)
     rustc-web cargo-web rustfmt-web
+    # native libraries of the Rust builds' -sys crates (normally pulled in by
+    # the librust-*-dev packages, which aren't used): bindgen/clang-sys,
+    # nettle-sys, openssl-sys, apt-pkg-native
+    libclang-dev nettle-dev libgmp-dev libssl-dev libapt-pkg-dev
 )
 
 # Build dependencies of the repositories built here that Devuan provides (from
@@ -241,7 +247,9 @@ setup_repo() {
     cat > "$R/update-index.sh" <<'EOF'
 #!/bin/sh
 # regenerate the local repository's index after adding packages
-cd "$(dirname "$0")" && apt-ftparchive packages . > Packages && gzip -9kf Packages
+# only the packages directly in this directory, not e.g. proxmox-fetch/'s cache
+cd "$(dirname "$0")" && apt-ftparchive packages . \
+    | awk -v RS= -v ORS='\n\n' '$0 ~ /\nFilename: \.\/[^\/\n]+\n/' > Packages && gzip -9kf Packages
 EOF
 
     cat > "$A/apt.sh" <<'EOF'
@@ -271,7 +279,7 @@ for f in $A/cache/archives/*.deb; do
     [ -e "$f" ] || continue
     echo "$names" | grep -qxF "$(basename "$f")" && cp -n "$f" $R/
 done
-$R/update-index.sh && sudo -n apt-get update -q >/dev/null 2>&1
+$R/update-index.sh && sudo apt-get update -q >/dev/null || { echo "ERROR: apt-get update failed" >&2; exit 1; }
 EOF
 
     cat > "$R/build-repo.sh" <<'EOF'
@@ -303,11 +311,11 @@ export DEB_BUILD_OPTIONS="${nocheck}${BUILD_PARALLEL:+ parallel=$BUILD_PARALLEL}
 echo "=== $(date -Is) building $name (source $src), profiles: $DEB_BUILD_PROFILES" | tee -a $log
 
 if [ -n "$RELAX_BUILD_DEPS" ]; then
-    sudo -n apt-get update -q >/dev/null 2>&1
+    sudo apt-get update -q >/dev/null || { echo "ERROR: apt-get update failed" | tee -a $log >&2; exit 1; }
     deps=$(perl -MDpkg::Control::Info -MDpkg::Deps -e 'my $s=Dpkg::Control::Info->new($ARGV[0])->get_source; for my $f (qw(Build-Depends Build-Depends-Indep Build-Depends-Arch)) { my $d=deps_parse($s->{$f}//"", build_dep=>1, build_profiles=>[split(/ /, $ENV{DEB_BUILD_PROFILES})], reduce_profiles=>1, reduce_arch=>1, host_arch=>"amd64", build_arch=>"amd64") or next; for my $x ($d->get_deps) { my @a = $x->isa("Dpkg::Deps::OR") ? $x->get_deps : ($x); print join("|", map { $_->{package} =~ s/:(native|any)$//r } @a), "\n" } }' "$control")
     for dep in $deps; do
         for alt in ${dep//|/ }; do
-            sudo -n apt-get install -y -q --no-install-recommends "$alt" >>$log 2>&1 && break
+            sudo apt-get install -y -q --no-install-recommends "$alt" >>$log 2>&1 && break
             echo "  build dependency not installable now: $alt" | tee -a $log
         done
     done
@@ -315,15 +323,17 @@ if [ -n "$RELAX_BUILD_DEPS" ]; then
     echo "no-check-builddeps" > ~/.config/dpkg/buildpackage.conf
     trap 'rm -f ~/.config/dpkg/buildpackage.conf' EXIT
 elif [ -z "$SKIP_BUILD_DEPS" ]; then
-    sudo -n apt-get update -q >/dev/null 2>&1
-    (cd /tmp && sudo -n mk-build-deps -i -r --build-profiles "${DEB_BUILD_PROFILES// /,}" \
+    sudo apt-get update -q >/dev/null || { echo "ERROR: apt-get update failed" | tee -a $log >&2; exit 1; }
+    (cd /tmp && sudo mk-build-deps -i -r --build-profiles "${DEB_BUILD_PROFILES// /,}" \
         -t "apt-get -y --no-install-recommends -o Debug::pkgProblemResolver=yes" "$dir/$control") 2>&1 | tee -a $log | grep -E "^E:|unmet|Unable|newly installed" || true
 fi
 
 stamp=$(mktemp); sleep 1
 # build directories are only created if missing, so stale ones would hide source changes
-make clean >>$log 2>&1 || true
-make $target 2>&1 | tee -a $log | grep -E "dpkg-buildpackage: (error|info: binary-only)|^E: |make: \*\*\*|error:" | tail -5
+# no terminal input: e.g. pve-qemu's Makefile runs an interactive git clean -i,
+# which then lists and keeps the files instead of waiting for an answer
+make clean </dev/null >>$log 2>&1 || true
+make $target </dev/null 2>&1 | tee -a $log | grep -E "dpkg-buildpackage: (error|info: binary-only)|^E: |make: \*\*\*|error:" | tail -5
 rc=${PIPESTATUS[0]}
 debs=$(find "$dir" -maxdepth 2 -name '*.deb' -newer $stamp)
 rm -f $stamp
@@ -332,7 +342,7 @@ if [ -z "$debs" ] || [ "$rc" -ne 0 ]; then
     echo "=== $name: no packages added (make rc=$rc, built: $(for d in $debs; do basename $d; done | tr '\n' ' '))" | tee -a $log
     exit 1
 fi
-cp $debs $R/ && $R/update-index.sh && sudo -n apt-get update -q >/dev/null 2>&1
+cp $debs $R/ && $R/update-index.sh && sudo apt-get update -q >/dev/null || { echo "ERROR: apt-get update failed" >&2; exit 1; }
 echo "=== $name: built (make rc=$rc): $(for d in $debs; do basename $d; done | tr '\n' ' ')" | tee -a $log
 EOF
 
@@ -409,6 +419,16 @@ fetch_proxmox() {
         [ -n "$line" ] && warn "$line"
     done < <(grep '^NOT' <<<"$out" || true)
     sudo apt-get update -q >/dev/null
+    # what the builds need must be visible to the system's apt now
+    local p missing=()
+    for p in "${PROXMOX_PACKAGES[@]}"; do
+        [ -n "$(apt-cache policy "$p" 2>/dev/null | sed -n 's/^ *Candidate: //p' | grep -v '(none)')" ] || missing+=("$p")
+    done
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "ERROR: not available to apt after fetching: ${missing[*]}" >&2
+        exit 1
+    fi
+    echo "all ${#PROXMOX_PACKAGES[@]} available to apt"
 }
 
 # allow sourcing the functions, e.g. for testing

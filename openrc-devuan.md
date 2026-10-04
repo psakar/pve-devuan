@@ -1320,16 +1320,19 @@ Each package is built after its build dependencies are installed.
    spiceterm, vncterm, libjs-extjs, fonts-font-logos, libjs-qrcodejs,
    novnc-pve, perlmod-bin, libproxmox-acme-perl, libproxmox-acme-plugins,
    libproxmox-rs-perl.
-2. **pve-common** (lsbservice) → libpve-common-perl (needs
-   libproxmox-rs-perl).
-3. **proxmox-perl-rs** → libpve-rs-perl, against the changed proxmox-rs
-   crates (needs perlmod-bin). `pve-rs/.cargo/config.toml` restricts cargo
+2. **proxmox-perl-rs** → libpve-rs-perl, first and without its tests
+   (`nocheck`): pve-common's build needs Proxmox's libproxmox-rs-perl,
+   which depends on libpve-rs-perl. libpve-rs-perl's build itself needs
+   libproxmox-rs-perl only for its tests, so with `nocheck` it needs no
+   package from that cycle; pve-common's build then installs both. It's built against the changed proxmox-rs crates
+   (needs perlmod-bin). `pve-rs/.cargo/config.toml` restricts cargo
    to Debian-packaged crates (`/usr/share/cargo/registry`), which Devuan
    doesn't have all of; it was renamed to `config.toml.debian` so cargo
    fetches from crates.io. libpve-rs-perl's packaging copy
    (`pve-rs/libpve-rs-perl-0.15.3/`) has a `.cargo/config.toml` patching
    the Proxmox crates to `~/proxmox/proxmox-rs` and a modified
    `debian/rules`.
+3. **pve-common** (lsbservice) → libpve-common-perl.
 4. **pve-qemu** → pve-qemu-kvm (stderr patch), based on `stable-11.0`.
 5. **pve-cluster**, with `WITH_TESTS=1 BUILD_PARALLEL=1`:
    - The `check` target generates `IPCC.so`/`IPCConst.pm`, and a parallel
