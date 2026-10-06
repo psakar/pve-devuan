@@ -311,18 +311,27 @@ step_pve-manager() { repo_build pve-manager BUILD_PARALLEL=1; }
 # part of the build's result. The names are resolved from Proxmox's current
 # index, so a newer kernel is picked up without changes here.
 step_proxmox-default-kernel() {
-    local A=$P/proxmox-fetch dir=$BASE/build/proxmox-default-kernel lists pkgs index f n=0
+    local A=$P/proxmox-fetch dir=$BASE/build/proxmox-default-kernel lists closure pkgs=() index p cand f n=0
     local opts=(-o "Dir::Etc::SourceList=$A/etc/sources.list" -o "Dir::Etc::SourceParts=$A/empty"
                 -o "Dir::Etc::Preferences=$A/etc/preferences" -o "Dir::Etc::PreferencesParts=$A/empty"
                 -o "Dir::State::Lists=$A/state/lists" -o "Dir::Cache=$A/cache")
     "$A/apt.sh" update -q >>"$LOG" 2>&1 || die "updating Proxmox's package lists failed, see $LOG"
     lists=("$A"/state/lists/*download.proxmox.com_*Packages)
     [ -e "${lists[0]}" ] || die "no Proxmox package lists in $A/state/lists"
-    # the dependency closure, limited to the packages in Proxmox's index (the
-    # others, e.g. initramfs-tools, come from Devuan)
-    mapfile -t pkgs < <(apt-cache "${opts[@]}" depends --recurse --no-recommends --no-suggests \
+    # the dependency closure, limited to the packages whose candidate (with
+    # the private configuration's pins) is Proxmox's: the others come from
+    # Devuan, e.g. initramfs-tools, or udev, which Proxmox has too (systemd's)
+    # but which is pinned to Devuan
+    declare -A proxmox_versions=()
+    while read -r p cand; do proxmox_versions["$p $cand"]=1; done \
+        < <(awk '/^Package: / { p = $2 } /^Version: / { print p, $2 }' "${lists[@]}")
+    mapfile -t closure < <(apt-cache "${opts[@]}" depends --recurse --no-recommends --no-suggests \
             --no-conflicts --no-breaks --no-replaces --no-enhances proxmox-default-kernel 2>>"$LOG" \
-        | grep -E '^[a-z0-9]' | sort -u | grep -xFf <(sed -n 's/^Package: //p' "${lists[@]}" | sort -u))
+        | grep -E '^[a-z0-9]' | sort -u)
+    for p in "${closure[@]}"; do
+        cand=$(apt-cache "${opts[@]}" policy "$p" 2>/dev/null | sed -n 's/^ *Candidate: //p')
+        [ -n "${proxmox_versions["$p $cand"]:-}" ] && pkgs+=("$p")
+    done
     printf '%s\n' "${pkgs[@]}" | grep -qx proxmox-default-kernel || die "proxmox-default-kernel not in Proxmox's index"
     # a kernel image is either signed or not (alternatives): only the signed
     # one, the unsigned is dropped where its -signed package is in the list
@@ -331,8 +340,7 @@ step_proxmox-default-kernel() {
     echo "downloading ${pkgs[*]}" | tee -a "$LOG"
     rm -rf "$dir"; mkdir -p "$dir"
     (cd "$dir" && "$A/apt.sh" download "${pkgs[@]}") </dev/null >>"$LOG" 2>&1 || die "downloading failed, see $LOG"
-    # only Proxmox's files (by name in its index): a package pinned to Devuan
-    # (e.g. the systemd family) was downloaded from Devuan and is dropped
+    # only Proxmox's files (by name in its index), as a safeguard;
     # read once: a pipe from sed into grep -q fails under pipefail when grep
     # exits at the match and sed gets SIGPIPE
     index=$(sed -n 's|^Filename: .*/||p' "${lists[@]}" | sort -u)
