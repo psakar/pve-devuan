@@ -3,6 +3,8 @@
 # Build the Proxmox VE packages for Devuan (sysvinit/OpenRC) from the
 # repositories in the current directory, as cloned by prepare-build.sh, into the
 # local repository repo/, in dependency order (see openrc-devuan.md, Part C).
+# The last step adds Proxmox's kernel (proxmox-default-kernel and the Proxmox
+# packages it depends on), not built here but needed to install Proxmox VE.
 #
 # Building installs build dependencies, including packages built here (e.g.
 # pve-cluster, whose daemon pmxcfs needs the hostname to resolve to a
@@ -38,7 +40,7 @@ NPROC=$(nproc)
 STEPS=(
     libpve-rs-perl pve-common pve-qemu pve-cluster pve-firewall pve-network
     pve-storage ifupdown2 lxc pve-lxc-syscalld pve-ha-manager qemu-server
-    pve-container pve-manager
+    pve-container pve-manager proxmox-default-kernel
 )
 
 FROM='' ONLY='' INSTALL=0 KEEP=0
@@ -301,6 +303,52 @@ step_qemu-server() { repo_build qemu-server RELAX_BUILD_DEPS=1; }
 
 step_pve-container() { repo_build pve-container; }
 step_pve-manager() { repo_build pve-manager BUILD_PARALLEL=1; }
+
+# Proxmox's kernel, not built here but needed to install Proxmox VE (pve-manager
+# depends on proxmox-default-kernel): the meta package and the Proxmox packages
+# it depends on (the kernel series, the kernel image, pve-firmware), downloaded
+# from Proxmox's repository with the private apt configuration into repo/, as
+# part of the build's result. The names are resolved from Proxmox's current
+# index, so a newer kernel is picked up without changes here.
+step_proxmox-default-kernel() {
+    local A=$P/proxmox-fetch dir=$BASE/build/proxmox-default-kernel lists pkgs index f n=0
+    local opts=(-o "Dir::Etc::SourceList=$A/etc/sources.list" -o "Dir::Etc::SourceParts=$A/empty"
+                -o "Dir::Etc::Preferences=$A/etc/preferences" -o "Dir::Etc::PreferencesParts=$A/empty"
+                -o "Dir::State::Lists=$A/state/lists" -o "Dir::Cache=$A/cache")
+    "$A/apt.sh" update -q >>"$LOG" 2>&1 || die "updating Proxmox's package lists failed, see $LOG"
+    lists=("$A"/state/lists/*download.proxmox.com_*Packages)
+    [ -e "${lists[0]}" ] || die "no Proxmox package lists in $A/state/lists"
+    # the dependency closure, limited to the packages in Proxmox's index (the
+    # others, e.g. initramfs-tools, come from Devuan)
+    mapfile -t pkgs < <(apt-cache "${opts[@]}" depends --recurse --no-recommends --no-suggests \
+            --no-conflicts --no-breaks --no-replaces --no-enhances proxmox-default-kernel 2>>"$LOG" \
+        | grep -E '^[a-z0-9]' | sort -u | grep -xFf <(sed -n 's/^Package: //p' "${lists[@]}" | sort -u))
+    printf '%s\n' "${pkgs[@]}" | grep -qx proxmox-default-kernel || die "proxmox-default-kernel not in Proxmox's index"
+    # a kernel image is either signed or not (alternatives): only the signed
+    # one, the unsigned is dropped where its -signed package is in the list
+    mapfile -t pkgs < <(printf '%s\n' "${pkgs[@]}" | awk '{ p[NR] = $0; has[$0] = 1 }
+        END { for (i = 1; i <= NR; i++) if (!((p[i] "-signed") in has)) print p[i] }')
+    echo "downloading ${pkgs[*]}" | tee -a "$LOG"
+    rm -rf "$dir"; mkdir -p "$dir"
+    (cd "$dir" && "$A/apt.sh" download "${pkgs[@]}") </dev/null >>"$LOG" 2>&1 || die "downloading failed, see $LOG"
+    # only Proxmox's files (by name in its index): a package pinned to Devuan
+    # (e.g. the systemd family) was downloaded from Devuan and is dropped
+    # read once: a pipe from sed into grep -q fails under pipefail when grep
+    # exits at the match and sed gets SIGPIPE
+    index=$(sed -n 's|^Filename: .*/||p' "${lists[@]}" | sort -u)
+    for f in "$dir"/*.deb; do
+        [ -e "$f" ] || continue
+        if grep -qxF "$(basename "$f")" <<<"$index"; then
+            cp "$f" "$R/"; n=$((n + 1))
+            echo "  $(basename "$f")" | tee -a "$LOG"
+        fi
+    done
+    rm -rf "$dir"
+    refresh_repo
+    [ -n "$(apt-cache policy proxmox-default-kernel | sed -n 's/^ *Candidate: //p' | grep -v '(none)')" ] \
+        || die "proxmox-default-kernel not available to apt from $R"
+    echo "=== proxmox-default-kernel: $n packages from Proxmox added to $R" | tee -a "$LOG"
+}
 
 # allow sourcing the functions, e.g. for testing
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0

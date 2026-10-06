@@ -93,7 +93,9 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 
 Fetched with signature-checked `Release` files (pve-no-subscription,
 ceph-squid, devel) into the local repository `repo-proxmox/`. None has init-system code
-affecting PVE, except where noted.
+affecting PVE, except where noted. The kernel (proxmox-default-kernel,
+proxmox-kernel-<series>, the kernel image, pve-firmware; not from these
+repositories) is downloaded by `build.sh`'s last step into `repo/` instead.
 
 | Repository | Path | Binary packages | Note |
 |---|---|---|---|

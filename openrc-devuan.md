@@ -1229,7 +1229,10 @@ to work in:
   Proxmox packages.
 - `build.sh` builds everything in the order below, with the special builds
   and the two bootstraps, into `repo/`; `--from <step>` resumes, `--install`
-  installs pve-manager afterwards.
+  installs pve-manager afterwards. Its last step, `proxmox-default-kernel`,
+  builds nothing: it downloads Proxmox's kernel (proxmox-default-kernel and
+  the Proxmox packages it depends on: the kernel series package, the kernel
+  image, pve-firmware) into `repo/`, as installing Proxmox VE needs it.
 
 The sections below describe what they do.
 
@@ -1254,8 +1257,9 @@ The sections below describe what they do.
 - **Two local apt repositories,** both enabled in
   `/etc/apt/sources.list.d/pve-devuan-local.list`
   (`deb [trusted=yes] file:<dir> ./`):
-  - `repo/`: only the packages built here (`+devuan<N>` versions), with
-    `build-repo.sh`;
+  - `repo/`: the build's result: the packages built here (`+devuan<N>`
+    versions), with `build-repo.sh`, and Proxmox's kernel packages added by
+    `build.sh`'s last step;
   - `repo-proxmox/`: the unchanged packages fetched from Proxmox's
     repository, with `fetch-proxmox.sh` and the private fetch
     configuration `proxmox-fetch/`;
