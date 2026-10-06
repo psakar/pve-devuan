@@ -1385,6 +1385,187 @@ Each package is built after its build dependencies are installed.
    - `https://<host>:8006` answers.
    - `pvesh get /nodes/<node>/services` reports the services.
 
+### Installing on another machine
+
+A Devuan 6 machine installs Proxmox VE from three sources: Devuan's
+repositories, the build machine's `repo/` (the packages built here and
+Proxmox's kernel) copied into the local repository `/srv/repo`, and Proxmox's
+repository `pve-no-subscription` for the unchanged Proxmox packages, pinned
+so it doesn't replace Devuan's or the packages built here.
+
+The commands are written to be copied as they are, from the rendered or the
+raw file; run them as root.
+
+**Prerequisite:** the machine runs Devuan 6 excalibur (amd64) with the OpenRC
+init system (sysvinit as PID 1, OpenRC as rc), which the packages' init
+scripts are made for. To check:
+
+```
+cat /etc/devuan_version     # excalibur
+ls -d /run/openrc           # exists when booted with OpenRC
+```
+
+Devuan's default rc is sysv-rc; `apt install openrc` replaces it, followed by
+a reboot.
+
+#### 1. The local repository
+
+Create `/srv/repo`, owned by the `_apt` user (apt reads local repositories
+as `_apt`), with the build machine's `repo/`, including its
+`Packages`/`Packages.gz`. For example, with the build in `~test/proxmox` on
+the build machine:
+
+```
+rsync -a test@<build machine>:proxmox/repo/ /srv/repo/
+chown -R _apt:root /srv/repo
+```
+
+After adding or removing `.deb` files there, regenerate the index with
+`/srv/repo/update-index.sh` (needs `apt-utils`), and run the `chown` again.
+
+#### 2. The apt configuration
+
+Proxmox's signing key, checked by its fingerprint (as in `prepare-build.sh`):
+
+```
+wget https://enterprise.proxmox.com/debian/proxmox-release-trixie.gpg \
+    -O /usr/share/keyrings/proxmox-release-trixie.gpg
+gpg --show-keys /usr/share/keyrings/proxmox-release-trixie.gpg
+# must show 24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E
+```
+
+The sources: the local repository and Proxmox's (apt only reads `.list` and
+`.sources` files in `sources.list.d`):
+
+```
+cat > /etc/apt/sources.list.d/proxmox-devuan-install.sources <<'EOF'
+Types: deb
+URIs: file:/srv/repo
+Suites: ./
+Trusted: yes
+
+Types: deb
+URIs: http://download.proxmox.com/debian/pve
+Suites: trixie
+Components: pve-no-subscription
+Signed-By: /usr/share/keyrings/proxmox-release-trixie.gpg
+EOF
+```
+
+The local repository is flat (suite `./`, no components) and unsigned
+(`Trusted: yes`); apt 3 notes "Missing Signed-By" for it, harmless.
+
+The pins, the same as the build's private fetch configuration
+(`prepare-build.sh`):
+
+```
+cat > /etc/apt/preferences.d/proxmox-devuan-install <<'EOF'
+# the local repository (the packages built here) always wins
+Package: *
+Pin: origin ""
+Pin-Priority: 1001
+
+# Proxmox's repository: only where Devuan doesn't have a suitable version
+Package: *
+Pin: origin download.proxmox.com
+Pin-Priority: 100
+
+# never take these from Proxmox: systemd, and the packages built here
+Package: systemd systemd-* libsystemd* udev libudev* libpam-systemd libnss-systemd libnss-myhostname
+Pin: origin download.proxmox.com
+Pin-Priority: -1
+
+Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2
+Pin: origin download.proxmox.com
+Pin-Priority: -1
+
+# Proxmox's packages need Ceph 19 (squid) libraries, Devuan has 18 (reef)
+Package: librados* librbd* libcephfs* librgw* libradosstriper* libceph* python3-ceph* python3-rados python3-rbd python3-cephfs python3-rgw ceph-common ceph-fuse libsqlite3-mod-ceph
+Pin: origin download.proxmox.com
+Pin-Priority: 600
+EOF
+```
+
+- Without the systemd pin, Proxmox's systemd packages would replace Devuan's.
+- Without the second -1 pin, a newer Proxmox release of a package built here
+  (e.g. pve-manager 9.2.22 over 9.2.21+devuan2) would replace it with the
+  systemd-only original. Upgrades of those come from rebuilds; keep the list
+  in sync with `build.sh`'s packages.
+- A newer unchanged Proxmox package may need a newer version of one built
+  here; apt then holds it back until that's rebuilt.
+
+Then:
+
+```
+apt update
+apt-cache policy pve-manager systemd
+```
+
+pve-manager's candidate is the `+devuan` version from `/srv/repo`, systemd's
+Devuan's.
+
+#### 3. The Proxmox kernel
+
+Install it and reboot into it, as in Proxmox's guide [Install Proxmox VE on
+Debian 13 Trixie: Install the Proxmox VE
+Kernel](https://pve.proxmox.com/wiki/Install_Proxmox_VE_on_Debian_13_Trixie#Install_the_Proxmox_VE_Kernel):
+
+```
+apt install -y proxmox-default-kernel
+reboot
+```
+
+After the reboot, `uname -r` shows the `-pve` kernel.
+
+#### 4. Proxmox VE
+
+The hostname must resolve to the machine's LAN address: pmxcfs (pve-cluster)
+refuses to start when it resolves to a loopback address only, as with the
+`127.0.1.1` entry of a default installation, and the installation fails
+("Unable to resolve node name … to a non-loopback IP address"). The address
+must not change, so give the machine a static one (or a fixed DHCP lease).
+
+```
+ip -4 addr                       # the machine's LAN address
+```
+
+Replace the `127.0.1.1` entry in `/etc/hosts`, with your address and domain:
+
+```
+IP=192.168.1.50                  # the machine's LAN address
+FQDN=$(hostname).example.lan     # the hostname with your domain
+sed -i '/^127\.0\.1\.1[[:space:]]/d' /etc/hosts
+echo "$IP $FQDN $(hostname)" >> /etc/hosts
+getent hosts "$(hostname)"       # must show the LAN address
+```
+
+Install a mail transport and time synchronization (Proxmox VE needs
+both: notifications are sent by mail, and its login tickets and the cluster
+need a correct clock), then Proxmox VE:
+
+```
+apt install postfix chrony
+apt install pve-manager
+dpkg --audit                     # empty when everything is configured
+```
+
+If the installation failed on pve-cluster because of the hostname, fix
+`/etc/hosts` as above, then finish it with:
+
+```
+apt -f install
+```
+
+Installing ifupdown2 (which replaces ifupdown) reloads the network
+configuration and may report `eth0: dhclient: timeout failed to detect new
+ip addresses` as the address is already assigned; the address stays. It
+also writes `/etc/network/interfaces.new`, applied at the next reboot:
+check it, e.g. for the static address.
+
+#### 5. Verification
+
+As in step 4 of the installation above.
+
 ## Part D: testing
 
 In priority order. ✘ means open; the step numbers refer to Part B.
