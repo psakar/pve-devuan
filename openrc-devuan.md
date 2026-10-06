@@ -1251,32 +1251,38 @@ The sections below describe what they do.
 - Build tools: `build-essential devscripts equivs fakeroot lintian
   apt-utils`, plus `rustc-web` 1.96 (replaces Devuan's `rustc`/`cargo`)
   for the Rust packages.
-- **Local apt repository** `/home/saki/proxmox/repo/`:
-  - enabled with
-    `/etc/apt/sources.list.d/pve-devuan-local.list`:
-    `deb [trusted=yes] file:/home/saki/proxmox/repo ./`
-  - `update-index.sh` regenerates `Packages(.gz)` with `apt-ftparchive`.
-- **Fetching unchanged Proxmox packages** (`repo/fetch-proxmox.sh pkg…`):
+- **Two local apt repositories,** both enabled in
+  `/etc/apt/sources.list.d/pve-devuan-local.list`
+  (`deb [trusted=yes] file:<dir> ./`):
+  - `repo/`: only the packages built here (`+devuan<N>` versions), with
+    `build-repo.sh`;
+  - `repo-proxmox/`: the unchanged packages fetched from Proxmox's
+    repository, with `fetch-proxmox.sh` and the private fetch
+    configuration `proxmox-fetch/`;
+  - each has an `update-index.sh` that regenerates its `Packages(.gz)` with
+    `apt-ftparchive`, from the `.deb` files directly in it.
+- **Fetching unchanged Proxmox packages**
+  (`repo-proxmox/fetch-proxmox.sh pkg…`):
   - `proxmox-fetch/apt.sh` runs apt-get with a private configuration: its
     own sources list, preferences, lists and cache. The system's apt never
     sees Proxmox's repository.
-  - Sources: Devuan, the local repo, and download.proxmox.com `pve trixie
-    pve-no-subscription`, `ceph-squid trixie no-subscription` and `devel
-    trixie main`. They're signed by
-    `proxmox-fetch/keys/proxmox-release-trixie.gpg`; `gpgv` checked each
-    `Release` ("Proxmox Trixie Release Key").
+  - Sources: Devuan, both local repositories, and download.proxmox.com `pve
+    trixie pve-no-subscription`, `ceph-squid trixie no-subscription` and
+    `devel trixie main`. They're signed by
+    `proxmox-fetch/keys/proxmox-release-trixie.gpg`, whose fingerprint
+    `prepare-build.sh` checks.
   - Pins:
 
     | Packages | Origin | Priority |
     |---|---|---|
-    | everything | local repo (origin "") | 1001 |
+    | everything | the local repositories (origin "") | 1001 |
     | everything | download.proxmox.com | 100 |
     | systemd family | download.proxmox.com | -1 |
     | every package built here | download.proxmox.com | -1 |
     | Ceph 19 client libraries | download.proxmox.com | 600 |
 
-  - The downloaded debs whose file name is in Proxmox's indexes are copied
-    into the local repo.
+  - Only the named packages are downloaded (`apt-get download`), checked
+    against the signed index, and copied into `repo-proxmox/`.
 - **Versions:** every package built here has a local version suffix
   (`+devuan1`, `+devuan2` …) on top of Proxmox's version; bump it for every
   rebuild with changes, as apt won't replace a package with a different one

@@ -6,8 +6,10 @@
 #
 # Building installs build dependencies, including packages built here (e.g.
 # pve-cluster, whose daemon pmxcfs needs the hostname to resolve to a
-# non-loopback address). Two dependency cycles are bootstrapped by installing
-# one package with dpkg --force-depends, fixed up by apt after the build:
+# non-loopback address). Two dependency cycles are bootstrapped by unpacking
+# one package with dpkg --unpack --force-depends (its files, without running
+# its maintainer scripts, e.g. starting a daemon), configured by apt after the
+# build:
 #   pve-cluster: its build needs libpve-access-control, which depends on it
 #   pve-network: its build needs pve-firewall, which depends on it
 #
@@ -28,6 +30,8 @@ set -euo pipefail
 BASE=$(pwd)
 R=$BASE/repo
 BUILD_REPO=$R/build-repo.sh
+# the unchanged packages fetched from Proxmox's repository by prepare-build.sh
+P=$BASE/repo-proxmox
 LOG=$BASE/build-logs/build.log
 NPROC=$(nproc)
 
@@ -61,13 +65,14 @@ info() { printf '\n=== %s\n' "$*" | tee -a "$LOG"; }
 die() { echo "ERROR: $*" | tee -a "$LOG" >&2; exit 1; }
 
 [ -x "$BUILD_REPO" ] || die "$BUILD_REPO missing, run prepare-build.sh first"
+[ -x "$P/fetch-proxmox.sh" ] || die "$P/fetch-proxmox.sh missing, run prepare-build.sh first"
 
 refresh_repo() {
     "$R/update-index.sh"
     sudo apt-get update -q >/dev/null || die "apt-get update failed"
 }
 
-# The packages prepare-build.sh fetched from Proxmox into repo/ must be visible
+# The packages prepare-build.sh fetched from Proxmox into repo-proxmox/ must be visible
 # to apt, or the builds fail on missing build dependencies.
 check_fetched() {
     local prepare missing=() p
@@ -120,11 +125,12 @@ install_some() { # [exclude regex]
     done
 }
 
-# The local repository's .deb of <package> with the highest version (by
-# Debian version comparison, not file name).
+# The local repositories' .deb of <package> with the highest version (by
+# Debian version comparison, not file name), from repo/ (built here) or
+# repo-proxmox/ (from Proxmox).
 newest_deb() { # <package>
     local f v best='' best_v=''
-    for f in "$R/$1"_*.deb; do
+    for f in "$R/$1"_*.deb "$P/$1"_*.deb; do
         [ -e "$f" ] || continue
         v=$(dpkg-deb -f "$f" Version)
         if [ -z "$best" ] || dpkg --compare-versions "$v" gt "$best_v"; then
@@ -135,20 +141,32 @@ newest_deb() { # <package>
 }
 
 # A package whose dependencies can't be installed yet: install what's
-# installable of them, then the package itself with dpkg --force-depends.
+# installable of them, then unpack the package itself with --force-depends.
+# Only its files are needed for the build; it gets configured (its maintainer
+# scripts run) by fix_up, once its dependencies are there.
 bootstrap_install() { # <package>
-    local deb
+    local deb out
     deb=$(newest_deb "$1")
-    [ -n "$deb" ] || die "no $1 in $R"
+    [ -n "$deb" ] || die "no $1 in $R or $P"
     package_deps "$deb" | install_some
-    echo "bootstrap: dpkg -i --force-depends $(basename "$deb")" | tee -a "$LOG"
-    sudo dpkg -i --force-depends "$deb" >>"$LOG" 2>&1 || die "installing $deb failed"
+    echo "bootstrap: dpkg --unpack --force-depends $(basename "$deb")" | tee -a "$LOG"
+    if ! out=$(sudo dpkg --unpack --force-depends "$deb" 2>&1); then
+        echo "$out" | tee -a "$LOG" | tail -15 >&2
+        die "unpacking $deb failed"
+    fi
+    echo "$out" >>"$LOG"
 }
 
-# Resolve the bootstrapped packages' dependencies with the packages just built.
+# Resolve the bootstrapped packages' dependencies with the packages just built,
+# and configure them.
 fix_up() {
+    local out
     refresh_repo
-    sudo apt-get -f install -y -q >>"$LOG" 2>&1 || die "apt-get -f install failed, see $LOG"
+    if ! out=$(sudo apt-get -f install -y -q 2>&1); then
+        echo "$out" | tee -a "$LOG" | tail -20 >&2
+        die "apt-get -f install failed, see $LOG"
+    fi
+    echo "$out" >>"$LOG"
     sudo dpkg --audit | tee -a "$LOG"
 }
 
@@ -288,6 +306,12 @@ step_pve-manager() { repo_build pve-manager BUILD_PARALLEL=1; }
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
 info "Checking the local repository"
+# apt installs nothing while installed packages have unmet dependencies, e.g.
+# after an interrupted build
+if ! sudo apt-get check -q >/dev/null 2>&1; then
+    sudo apt-get check -q 2>&1 | grep -vE '^(Reading|Building|Done)' >&2 || true
+    die "installed packages have unmet dependencies; see what 'sudo apt --fix-broken install -s' proposes, apply it, then resume with --from"
+fi
 refresh_repo
 check_fetched
 

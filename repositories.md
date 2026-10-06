@@ -92,7 +92,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 ## 3. Installed unchanged from download.proxmox.com
 
 Fetched with signature-checked `Release` files (pve-no-subscription,
-ceph-squid, devel) into the local repo. None has init-system code
+ceph-squid, devel) into the local repository `repo-proxmox/`. None has init-system code
 affecting PVE, except where noted.
 
 | Repository | Path | Binary packages | Note |

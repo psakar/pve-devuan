@@ -7,13 +7,15 @@
 #     'origin'), with Proxmox's repository as remote 'upstream', and perlmod
 #     and proxmox-ve-rs, whose crates libpve-rs-perl is built against
 #  2. install the build tools and the build dependencies Devuan provides
-#  3. set up the local apt repository (repo/) and the private apt configuration
-#     for fetching unchanged packages from Proxmox's repository, after checking
+#  3. set up two local apt repositories: repo/ for the packages built here,
+#     repo-proxmox/ for the unchanged packages from Proxmox's repository, with
+#     the private apt configuration for fetching those, after checking
 #     Proxmox's signing key
 #  4. fetch the unchanged Proxmox packages the build and the installation need
+#     into repo-proxmox/
 #
 # Needs git and sudo. Safe to run again: existing clones and packages are kept;
-# repo/'s scripts and apt configuration are rewritten.
+# the scripts and apt configuration are rewritten.
 #
 # Usage: prepare-build.sh [--with-planned] [--with-reference] [--no-deps] [--no-clone]
 #   --with-planned    also clone the repositories with open plan items
@@ -233,24 +235,37 @@ check_devuan() {
 
 install_packages() {
     info "Installing the build tools and build dependencies"
+    # apt installs nothing while installed packages have unmet dependencies,
+    # e.g. after an interrupted build that installed some built packages
+    if ! sudo apt-get check -q >/dev/null 2>&1; then
+        echo "ERROR: installed packages have unmet dependencies (apt-get check):" >&2
+        sudo apt-get check -q 2>&1 | grep -vE '^(Reading|Building|Done)' >&2 || true
+        echo "See what 'sudo apt --fix-broken install -s' proposes and apply it, then run this again." >&2
+        exit 1
+    fi
     sudo apt-get update -q
     sudo apt-get install -y -q --no-install-recommends "${TOOLS[@]}" "${BUILD_DEPS[@]}"
 }
 
-# The local apt repository (repo/) with the scripts for building into it and
-# fetching from Proxmox's repository into it.
+# The two local apt repositories: repo/ for the packages built here, with the
+# script for building into it, and repo-proxmox/ for the unchanged packages
+# from Proxmox's repository, with the script and private apt configuration for
+# fetching them.
 setup_repo() {
-    local R=$BASE/repo A=$BASE/repo/proxmox-fetch
-    info "Setting up the local repository in $R"
-    mkdir -p "$R" "$A"/{etc,keys,empty,state/lists/partial,cache/archives/partial} "$BASE/build-logs"
+    local R=$BASE/repo P=$BASE/repo-proxmox A=$BASE/repo-proxmox/proxmox-fetch dir
+    info "Setting up the local repositories $R and $P"
+    mkdir -p "$R" "$P" "$BASE/build-logs"
+    mkdir -p "$A"/{etc,keys,empty,state/lists/partial,cache/archives/partial}
 
-    cat > "$R/update-index.sh" <<'EOF'
+    for dir in "$R" "$P"; do
+        cat > "$dir/update-index.sh" <<'EOF'
 #!/bin/sh
 # regenerate the local repository's index after adding packages
 # only the packages directly in this directory, not e.g. proxmox-fetch/'s cache
 cd "$(dirname "$0")" && apt-ftparchive packages . \
     | awk -v RS= -v ORS='\n\n' '$0 ~ /\nFilename: \.\/[^\/\n]+\n/' > Packages && gzip -9kf Packages
 EOF
+    done
 
     cat > "$A/apt.sh" <<'EOF'
 #!/bin/sh
@@ -262,11 +277,12 @@ exec apt-get -o Dir::Etc::SourceList=$A/etc/sources.list -o Dir::Etc::SourcePart
     -o Debug::NoLocking=1 "$@"
 EOF
 
-    cat > "$R/fetch-proxmox.sh" <<'EOF'
+    cat > "$P/fetch-proxmox.sh" <<'EOF'
 #!/bin/bash
 # Download packages from Proxmox's repository with the private apt configuration
-# and add them to the local repository. Only the named packages are downloaded
-# (not their dependencies); apt checks them against the signed index.
+# and add them to this local repository (repo-proxmox/). Only the named packages
+# are downloaded (not their dependencies); apt checks them against the signed
+# index.
 R=$(cd "$(dirname "$0")" && pwd); A=$R/proxmox-fetch
 L=$(dirname "$R")/build-logs/proxmox-fetch.log
 $A/apt.sh update -q >>$L 2>&1
@@ -289,7 +305,8 @@ EOF
 # usage: build-repo.sh <repo dir> [make target (default: deb)]
 # env: WITH_TESTS=1 (run the tests), BUILD_PARALLEL=<n>, RELAX_BUILD_DEPS=1
 #      (circular build dependencies: install what's installable, skip the
-#      check), SKIP_BUILD_DEPS=1
+#      check), SKIP_BUILD_DEPS=1 (the caller installed them, e.g. a package
+#      only unpacked for bootstrapping a cycle: skip installing and the check)
 set -o pipefail
 R=$(cd "$(dirname "$0")" && pwd)
 LOGDIR=$(dirname "$R")/build-logs
@@ -322,7 +339,12 @@ if [ -n "$RELAX_BUILD_DEPS" ]; then
     mkdir -p ~/.config/dpkg
     echo "no-check-builddeps" > ~/.config/dpkg/buildpackage.conf
     trap 'rm -f ~/.config/dpkg/buildpackage.conf' EXIT
-elif [ -z "$SKIP_BUILD_DEPS" ]; then
+elif [ -n "$SKIP_BUILD_DEPS" ]; then
+    # dpkg's check doesn't count unpacked (not configured) packages
+    mkdir -p ~/.config/dpkg
+    echo "no-check-builddeps" > ~/.config/dpkg/buildpackage.conf
+    trap 'rm -f ~/.config/dpkg/buildpackage.conf' EXIT
+else
     sudo apt-get update -q >/dev/null || { echo "ERROR: apt-get update failed" | tee -a $log >&2; exit 1; }
     (cd /tmp && sudo mk-build-deps -i -r --build-profiles "${DEB_BUILD_PROFILES// /,}" \
         -t "apt-get -y --no-install-recommends -o Debug::pkgProblemResolver=yes" "$dir/$control") 2>&1 | tee -a $log | grep -E "^E:|unmet|Unable|newly installed" || true
@@ -351,6 +373,7 @@ deb http://deb.devuan.org/merged excalibur main non-free-firmware
 deb http://deb.devuan.org/merged excalibur-security main non-free-firmware
 deb http://deb.devuan.org/merged excalibur-updates main non-free-firmware
 deb [trusted=yes] file:$R ./
+deb [trusted=yes] file:$P ./
 deb [signed-by=$A/keys/proxmox-release-trixie.gpg] http://download.proxmox.com/debian/pve trixie pve-no-subscription
 deb [signed-by=$A/keys/proxmox-release-trixie.gpg] http://download.proxmox.com/debian/ceph-squid trixie no-subscription
 deb [signed-by=$A/keys/proxmox-release-trixie.gpg] http://download.proxmox.com/debian/devel trixie main
@@ -360,7 +383,7 @@ EOF
 # Private apt configuration for picking packages from Proxmox's repository
 # into the local repository; the system's apt doesn't use Proxmox's repository.
 
-# our own builds (the init-system changes) always win
+# the local repositories (our builds, and what was fetched already) always win
 Package: *
 Pin: origin ""
 Pin-Priority: 1001
@@ -386,16 +409,17 @@ Pin: origin download.proxmox.com
 Pin-Priority: 600
 EOF
 
-    chmod +x "$R/update-index.sh" "$R/fetch-proxmox.sh" "$R/build-repo.sh" "$A/apt.sh"
-    [ -e "$R/Packages" ] || "$R/update-index.sh"
+    chmod +x "$R/update-index.sh" "$P/update-index.sh" "$P/fetch-proxmox.sh" "$R/build-repo.sh" "$A/apt.sh"
+    "$R/update-index.sh"
+    "$P/update-index.sh"
 
-    # the system's apt uses the local repository (not Proxmox's)
-    echo "deb [trusted=yes] file:$R ./" | sudo tee /etc/apt/sources.list.d/pve-devuan-local.list >/dev/null
+    # the system's apt uses the local repositories (not Proxmox's)
+    printf 'deb [trusted=yes] file:%s ./\n' "$R" "$P" | sudo tee /etc/apt/sources.list.d/pve-devuan-local.list >/dev/null
 }
 
 # Proxmox's signing key, checked by its fingerprint before use
 setup_key() {
-    local key=$BASE/repo/proxmox-fetch/keys/proxmox-release-trixie.gpg tmp
+    local key=$BASE/repo-proxmox/proxmox-fetch/keys/proxmox-release-trixie.gpg tmp
     info "Checking Proxmox's signing key"
     if [ ! -s "$key" ]; then
         tmp=$(mktemp)
@@ -411,9 +435,9 @@ setup_key() {
 }
 
 fetch_proxmox() {
-    info "Fetching the unchanged packages from Proxmox's repository"
+    info "Fetching the unchanged packages from Proxmox's repository into repo-proxmox/"
     local out
-    out=$("$BASE/repo/fetch-proxmox.sh" "${PROXMOX_PACKAGES[@]}")
+    out=$("$BASE/repo-proxmox/fetch-proxmox.sh" "${PROXMOX_PACKAGES[@]}")
     echo "fetched: $(grep -c '^fetched' <<<"$out" || true) of ${#PROXMOX_PACKAGES[@]}"
     while read -r line; do
         [ -n "$line" ] && warn "$line"
