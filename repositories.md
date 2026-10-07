@@ -87,7 +87,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 
 | Repository | Path | Binary packages |
 |---|---|---|
-| proxmox-perl-rs | `proxmox-perl-rs` | libpve-rs-perl (`0.15.3+devuan1`): the Perl/Rust bindings are unchanged, but it's built against the changed proxmox-rs crates (section 1), on branch `feature/init-systems-refactoring` (2 commits). Uncommitted build workaround: `pve-rs/.cargo/config.toml` renamed to `config.toml.debian`, so cargo uses crates.io. libproxmox-rs-perl from the same repository is Proxmox's (section 3) |
+| proxmox-perl-rs | `proxmox-perl-rs` | libpve-rs-perl (`0.15.3+devuan1`): the Perl/Rust bindings are unchanged, but it's built against the changed proxmox-rs crates (section 1), on branch `feature/init-systems-refactoring` (2 commits). Built by `build.sh` in a copy outside the repository with a generated `.cargo/config.toml` (local crates patched in, the rest from crates.io); the repository's own is unchanged. libproxmox-rs-perl from the same repository is Proxmox's (section 3) |
 
 ## 3. Installed unchanged from download.proxmox.com
 

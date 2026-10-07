@@ -488,10 +488,11 @@ Build/packaging:
 - ✔ proxmox-perl-rs: libpve-rs-perl (which contains the APT bindings)
   rebuilt against the fixed `proxmox-apt` and `proxmox-apt-api-types` and
   installed.
-  - Its build directory `pve-rs/libpve-rs-perl-0.15.3/` has a
-    `.cargo/config.toml` patching every Proxmox crate to
-    `/home/saki/proxmox/proxmox-rs/<crate>`, and a modified `debian/rules`
-    (default `CARGO_HOME`, no `prepare-debian`).
+  - `build.sh` builds it in a copy outside the repository
+    (`build/libpve-rs-perl-<version>/`), whose `.cargo/config.toml` it
+    replaces with a `[patch.crates-io]` section pointing every crate of the
+    local proxmox-rs, proxmox-ve-rs and perlmod at its directory, and whose
+    `debian/rules` it modifies (default `CARGO_HOME`, no `prepare-debian`).
   - Built with `dpkg-buildpackage -b -us -uc -d`; the `librust-*` build
     dependencies are replaced by crates.io and the local crates.
   - Version `0.15.3+devuan1` (step 79); installing it restarts the daemons
@@ -499,9 +500,20 @@ Build/packaging:
 - ✔ proxmox-perl-rs: libpve-rs-perl rebuilt again with the fixed
   `proxmox-log` and installed: `pvesh`, `qm`, `pvesubscription` and the
   daemons' init scripts no longer print `Unable to open syslog`.
-- ✘ proxmox-perl-rs: replace the `pve-rs/.cargo/config.toml` rename (build
-  workaround) with a proper option, or package the missing crates for
-  Devuan.
+- ✔ proxmox-perl-rs: no change to the repository for the build. The
+  former workaround (`pve-rs/.cargo/config.toml` renamed to
+  `config.toml.debian`, so cargo didn't use Debian's crate registry) is gone:
+  `build.sh` replaces the `.cargo/config.toml` of its out-of-tree build copy
+  only (see above), and the repository's file stays as Proxmox has it.
+  - The build needs crates.io access, for the crates Devuan doesn't package
+    (at the versions needed).
+  - Optional alternative, not planned: package the missing `librust-*`
+    crates for Devuan, at the versions Proxmox's crates need, as Proxmox
+    does in its own repository. The build could then resolve its build
+    dependencies with apt and run offline, as a Debian-policy build with the
+    repository's `.cargo/config.toml` (`/usr/share/cargo/registry`). It's
+    a large amount of work and keeping the crates current is ongoing work,
+    for no change in the resulting package.
 
 ### proxmox-widget-toolkit and ui (pve-yew-mobile-gui)
 
@@ -1224,9 +1236,7 @@ expects Debian's packaged crates.
       plus a taint-mode run with a tainted cursor.
 
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
-`proxmox-rs/init-system-rework.md` (untracked in proxmox-rs), and the
-`proxmox-perl-rs/pve-rs/.cargo/config.toml` renamed to `config.toml.debian`
-(build workaround, see Part C).
+`proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
 ### Changes per repository
 
@@ -1342,8 +1352,9 @@ The sections below describe what they do.
 - **Special builds:**
   - qemu-server needs `RELAX_BUILD_DEPS=1`: it build-depends on
     `pve-qemu-kvm (>= 11.1~)` (for its tests) while 11.0.3 is installed.
-  - libpve-rs-perl is built in `proxmox-perl-rs/pve-rs/libpve-rs-perl-0.15.3/`
-    with local `.cargo/config.toml` patches and `dpkg-buildpackage -d`.
+  - libpve-rs-perl is built in `~/proxmox/build/libpve-rs-perl-<version>/`
+    with a generated `.cargo/config.toml` (the local crates patched in) and
+    `dpkg-buildpackage -d`.
   - pve-lxc-syscalld is built from its build directory moved to
     `~/proxmox/build/` (its own `.cargo` config points at Debian's crate
     registry), without `.cargo`, without the `prepare-debian` line in
@@ -1385,11 +1396,13 @@ Each package is built after its build dependencies are installed.
    package from that cycle; pve-common's build then installs both. It's built against the changed proxmox-rs crates
    (needs perlmod-bin). `pve-rs/.cargo/config.toml` restricts cargo
    to Debian-packaged crates (`/usr/share/cargo/registry`), which Devuan
-   doesn't have all of; it was renamed to `config.toml.debian` so cargo
-   fetches from crates.io. libpve-rs-perl's packaging copy
-   (`pve-rs/libpve-rs-perl-0.15.3/`) has a `.cargo/config.toml` patching
-   the Proxmox crates to `~/proxmox/proxmox-rs` and a modified
-   `debian/rules`.
+   doesn't have all of. So it's built in a copy outside the repository
+   (`build/libpve-rs-perl-<version>/`, made by the package's `make
+   libpve-rs-perl-<version>`), whose `.cargo/config.toml` is replaced by a
+   `[patch.crates-io]` section pointing the crates of the local proxmox-rs,
+   proxmox-ve-rs and perlmod at their directories (the other crates come
+   from crates.io), and whose `debian/rules` doesn't set up the Debian
+   registry. The repository stays unchanged.
 3. **pve-common** (lsbservice) → libpve-common-perl.
 4. **pve-qemu** → pve-qemu-kvm (stderr patch), based on `stable-11.0`.
 5. **pve-cluster**, with `WITH_TESTS=1 BUILD_PARALLEL=1`:
