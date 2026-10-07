@@ -39,7 +39,7 @@ NPROC=$(nproc)
 
 STEPS=(
     libpve-rs-perl pve-common pve-qemu pve-cluster pve-firewall pve-network
-    pve-storage ifupdown2 lxc pve-lxc-syscalld pve-ha-manager qemu-server
+    pve-storage ifupdown2 frr lxc pve-lxc-syscalld pve-ha-manager qemu-server
     pve-container pve-manager proxmox-default-kernel
 )
 
@@ -273,6 +273,7 @@ step_pve-network() {
 
 step_pve-storage() { repo_build pve-storage; }
 step_ifupdown2() { repo_build ifupdown2; }
+step_frr() { repo_build frr BUILD_PARALLEL="$NPROC"; }
 step_lxc() { repo_build lxc BUILD_PARALLEL="$NPROC"; }
 
 # pve-lxc-syscalld: its own .cargo config points at the Debian crate registry,

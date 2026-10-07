@@ -294,10 +294,12 @@ Build/packaging:
 Code:
 
 - ✔ `PVE/Network/SDN/Frr.pm`, `Controllers/FaucetPlugin.pm`: frr and faucet
-  via the facade; frrinit.sh directly if there's no frr service (57).
+  via the facade (57; the fallback to running frrinit.sh directly without
+  an frr service was dropped in 87).
 - ✔ `PVE/Network/SDN/Dhcp/Dnsmasq.pm`: `dnsmasq@<zone>` instances via the
   facade (58).
-- ✘ Drop the frrinit.sh fallback once frr has an init script (see frr).
+- ✔ frrinit.sh fallback dropped: frr has an init script (see frr), so it's
+  enabled, started and restarted through the facade only (87).
 
 Build/packaging:
 
@@ -538,9 +540,16 @@ Code: none.
 
 Build/packaging:
 
-- ✘ `pkg.frr.lsbservice`: install `frrinit.sh` as `/etc/init.d/frr`
-  (after networking) instead of the units, and drop `Depends: systemd`.
-  Devuan's own frr has no init script either.
+- ✔ `pkg.frr.lsbservice`: upstream's `frrinit.sh` installed as
+  `/etc/init.d/frr` instead of the units (86).
+  - Like the units, it's neither enabled nor started on installation
+    (`update-rc.d frr defaults-disabled`); pve-network's SDN enables and
+    starts it when needed. Its LSB header starts it after `$network`.
+  - As `debian/rules` comes from upstream's tree, the Makefile applies the
+    profile when preparing the build directory, so `DEB_BUILD_PROFILES`
+    must be set for `make` too (`build-repo.sh` does).
+  - frr never had `Depends: systemd`; Devuan's own frr has no init script
+    either.
 
 ### proxmox-ve (meta), packaging-only
 
@@ -1235,6 +1244,34 @@ expects Debian's packaged crates.
     - Tests: 18 in `test/initsystem-test.pl` (cursors, rotation, filters),
       plus a taint-mode run with a tainted cursor.
 
+### Phase 17: frr
+
+86. **frr: init script** (`e2345a8`, `2fce5d4`, `1be9733`;
+    `10.6.1-1+pve3+devuan1`):
+    - Absolute URL of the `frr` submodule, as in step 83. Pushed to
+      `https://github.com/psakar/frr` (a plain repository with Proxmox's
+      `master`, like ifupdown2's).
+    - `pkg.frr.lsbservice`: the Makefile, which prepares the build directory
+      from upstream's tree and already edits its `debian/rules`, keeps
+      `cp build/tools/frrinit.sh debian/frr.init` and drops the units'
+      copies instead, and installs the init script with `dh_installinit -r
+      --no-enable --no-start` (the units' `--no-enable --no-start`). Plus a
+      lintian override for the init script without unit.
+    - Built with and without the profile: the default `debian/rules` is
+      unchanged; the lsbservice packages have `/etc/init.d/frr`
+      (executable, `update-rc.d frr defaults-disabled`, removed on purge)
+      and no units, and pass lintian (upstream's warnings only).
+    - `build.sh` builds frr after ifupdown2; `prepare-build.sh` clones it
+      as a changed repository, and the pins keep `frr` and `frr-*` from
+      Proxmox's repository (pve-network recommends frr-pythontools).
+    - Not tested at runtime yet: SDN enabling and starting frr on pve2.
+87. **pve-network `6e9b339`, `4cff062` (`1.6.7+devuan2`): sdn: frr: drop
+    the fallback to running frrinit.sh directly.** With the init script
+    from step 86, `Frr.pm` enables, starts and restarts frr through
+    `PVE::InitSystem` only. Without an frr service, `apply()` now fails in
+    `enable_service`, as `systemctl enable --now frr` does, instead of
+    warning and running the script.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1250,13 +1287,14 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | pve-container | `de0ddd65` | 43, 44, 79 |
 | pve-storage | `f1a6ef43` | 46–48, 79 |
 | pve-firewall | `9480dd17` | 49, 50, 53, 79–81 |
-| pve-network | `ce388c5e` | 57, 58, 60, 66, 79 |
+| pve-network | `ce388c5e` | 57, 58, 60, 66, 79, 87 |
 | pve-lxc-syscalld | `410afbcb` | 61, 79 |
 | lxc | `680dfc75` | 62, 68, 79, 83 |
 | ifupdown2 | `9cc4d923` | 67, 78, 83 |
 | proxmox-rs | `89c1d597` | 70–73, 77 |
 | pve-qemu | `7fccdcf` (stable-11.0) | 75, 83 |
 | proxmox-perl-rs | `38ce5a02` | 79, 82 |
+| frr | `20d9f22` | 86 |
 
 All repositories are at `~/proxmox/<name>`.
 
@@ -1301,10 +1339,9 @@ The sections below describe what they do.
   `upstream` in the top-level repositories (proxmox-rs from
   `https://github.com/proxmox/proxmox-rs.git`), with the changed ones on
   `feature/init-systems-refactoring`, pushed to and tracking their GitHub
-  forks `https://github.com/psakar/<name>` (remote `origin`; ifupdown2's is a
-  plain repository, as Proxmox has no GitHub mirror of it). All changed repositories are in
-  `~/proxmox/<name>`, as are those with open plan items (frr,
-  corosync-pve, ksm-control-daemon, proxmox-ve, proxmox-kernel-helper,
+  forks `https://github.com/psakar/<name>` (remote `origin`; ifupdown2's and frr's are
+  plain repositories, as Proxmox has no GitHub mirror of them). All changed repositories are in
+  `~/proxmox/<name>`, as are those with open plan items (corosync-pve, ksm-control-daemon, proxmox-ve, proxmox-kernel-helper,
   pve-vgpu-helper, proxmox-firewall, proxmox-widget-toolkit, `ui/`, and
   zfsonlinux and ceph, out of scope for now). `~/proxmox/deps/` keeps only
   the 23 unchanged repositories of installed packages (see
@@ -1414,7 +1451,8 @@ Each package is built after its build dependencies are installed.
 6. **pve-storage**, then **pve-firewall** and **pve-network**. They depend
    on each other: bootstrap-install one with `--force-depends`, build the
    other, then reinstall both cleanly with apt.
-7. **ifupdown2** (needed once libpve-network-perl is installed).
+7. **ifupdown2** (needed once libpve-network-perl is installed), and
+   **frr** (`pkg.frr.lsbservice`).
 8. **pve-ha-manager**, **lxc**, **pve-lxc-syscalld**. Build
    pve-lxc-syscalld outside the repository tree (`~/proxmox/build/`),
    because cargo picks up `.cargo/config.toml` from parent directories.
@@ -1572,7 +1610,7 @@ Package: systemd systemd-* libsystemd* udev libudev* libpam-systemd libnss-syste
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
-Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2
+Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-*
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
@@ -1588,6 +1626,10 @@ EOF
   (e.g. pve-manager 9.2.22 over 9.2.21+devuan2) would replace it with the
   systemd-only original. Upgrades of those come from rebuilds; keep the list
   in sync with `build.sh`'s packages.
+- `frr frr-*` in that list: pve-network recommends `frr-pythontools (>=
+  10.3.1-1+pve2~)`, which Devuan's frr (10.3) doesn't satisfy, so apt would
+  otherwise take Proxmox's frr, which has only systemd units, no init
+  script; with the pin, frr comes from `/srv/repo`.
 - A newer unchanged Proxmox package may need a newer version of one built
   here; apt then holds it back until that's rebuilt.
 
@@ -1718,6 +1760,22 @@ Without `--rsync` it copies with scp, which doesn't remove debs no longer in
 `repo/` (harmless: apt reads only the copied `Packages` index); without
 `--upgrade` it only copies, and `apt update && apt full-upgrade` is run on
 the install machine by hand.
+
+When the build adds packages, the install machine's pins (step 2) need them
+too, before the upgrade, so Proxmox's versions of them are never taken.
+frr (`frr`, `frr-*`; step 86) was added after the first installations; on
+the install machine, as root:
+
+```
+grep -q ' frr frr-\*$' /etc/apt/preferences.d/proxmox-devuan-install ||
+sed -i '/^Package: libpve-common-perl /s/$/ frr frr-*/' /etc/apt/preferences.d/proxmox-devuan-install
+grep '^Package: libpve-common-perl' /etc/apt/preferences.d/proxmox-devuan-install
+apt update
+apt-cache policy frr frr-pythontools
+```
+
+The `Package:` line must end with `ifupdown2 frr frr-*`, as in step 2;
+after the copy, frr's candidate is the `+devuan` version from `/srv/repo`.
 
 ## Part D: testing
 
