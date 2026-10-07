@@ -1262,7 +1262,7 @@ Order constraints when redoing it:
 
 ## Part C: building and installing
 
-Two scripts in `~/proxmox` automate this part; run them from the directory
+Three scripts in `~/proxmox` automate this part; run them from the directory
 to work in:
 
 - `prepare-build.sh` clones the repositories (Devuan branches from the
@@ -1276,6 +1276,11 @@ to work in:
   builds nothing: it downloads Proxmox's kernel (proxmox-default-kernel and
   the Proxmox packages it depends on: the kernel series package, the kernel
   image, pve-firmware) into `repo/`, as installing Proxmox VE needs it.
+- `update-repo.sh` copies `repo/` to `/srv/repo` on an install machine
+  (`REMOTE_MACHINE`, by default `root@pve2`) with scp, or with
+  `rsync --delete` (`--rsync`), and gives it to `_apt`; `--upgrade` then runs
+  `apt update && apt full-upgrade` there (see "Installing on another
+  machine").
 
 The sections below describe what they do.
 
@@ -1495,6 +1500,13 @@ chown -R _apt:root /srv/repo
 After adding or removing `.deb` files there, regenerate the index with
 `/srv/repo/update-index.sh` (needs `apt-utils`), and run the `chown` again.
 
+Or, on the build machine (with root's SSH access to the install machine),
+`update-repo.sh` does both commands:
+
+```
+REMOTE_MACHINE=root@<install machine> ./update-repo.sh --rsync
+```
+
 #### 2. The apt configuration
 
 Proxmox's signing key, checked by its fingerprint (as in `prepare-build.sh`):
@@ -1680,6 +1692,19 @@ for s in pve-cluster pvedaemon pveproxy spiceproxy pvestatd pvescheduler; do rc-
 #### 5. Verification
 
 As in step 4 of the installation above.
+
+#### 6. Updating after a rebuild
+
+On the build machine, after `build.sh`, copy the new `repo/` and upgrade:
+
+```
+REMOTE_MACHINE=root@<install machine> ./update-repo.sh --rsync --upgrade
+```
+
+Without `--rsync` it copies with scp, which doesn't remove debs no longer in
+`repo/` (harmless: apt reads only the copied `Packages` index); without
+`--upgrade` it only copies, and `apt update && apt full-upgrade` is run on
+the install machine by hand.
 
 ## Part D: testing
 
