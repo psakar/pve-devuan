@@ -100,6 +100,8 @@ Code:
     read from `/etc/localtime` (8)
 - ✔ Service state, reload, try-reload-or-restart, enable/disable, main PID,
   and `dump_syslog`; `PVE::Tools::dump_journal` becomes a wrapper (9).
+- ✔ `read_journal`: the journal API from the rsyslog files, for the web
+  UI's system and service logs (85).
 - ✔ `started_by_init()` with the `PVE_INIT_SCRIPT` marker, used by
   `PVE::Daemon` (14).
 - ✔ `PVE::Systemd::systemd_call` restored (31); prototype fix in the
@@ -151,8 +153,10 @@ Build/packaging:
 Code:
 
 - ✔ Services API, certificate/ACME reload, `pveupdate`, `pveceph`, the
-  syslog, journal and time APIs all go through `PVE::InitSystem`. The
-  journal API returns 501 without mini-journalreader (13).
+  syslog, journal and time APIs all go through `PVE::InitSystem` (13).
+  Without mini-journalreader, the journal API reads the syslog files via
+  `PVE::InitSystem::read_journal` (85); it returned 501 before, and the
+  web UI's node "System Log" and service logs stayed empty.
 - ✔ `test/check-init-system-calls.sh` in `make check` (13).
 - ✘ NIC name pinning (`PVE/CLI/pve_network_interface_pinning.pm`,
   `configs/virtual-function-pinning-helper`): write udev rules
@@ -501,11 +505,18 @@ Build/packaging:
 
 ### proxmox-widget-toolkit and ui (pve-yew-mobile-gui)
 
-Code:
+Code: none.
 
-- ✘ Journal views (`src/panel/JournalView.js`, the mobile GUI's journal
-  view): when `GET /nodes/{node}/journal` returns 501, fall back to
-  `GET /nodes/{node}/syslog` (paged, no cursors).
+- ✔ Journal views: no change needed. `GET /nodes/{node}/journal` no longer
+  returns 501 under LSB; it's served from the syslog files in
+  mini-journalreader's plain format (pve-common, pve-manager, step 85).
+  - `src/panel/JournalView.js` accepts that format also when it asks for
+    `structured` (as Node → System Log does), as its legacy flat-string
+    format.
+  - pve-yew-mobile-gui has no journal view. proxmox-yew-comp's journal view
+    (`journal_view.rs`, not used by PVE) handles the plain format only with
+    `structured` off: in structured mode it expects records and would fail
+    on the plain lines.
 
 Build/packaging: none.
 
@@ -1189,6 +1200,29 @@ expects Debian's packaged crates.
       synchronous worker the terminal when stdin is one, and `tcsetpgrp`
       failed with ENOTTY: no guest was started on boot
       (`known-issues.md`). The unit's stdin is `/dev/null`.
+85. **Journal API without systemd's journal** (pve-common `cccffb1`,
+    `+devuan2`; pve-manager `ef8bd820`, in `+devuan3`):
+    - The web UI's node "System Log" and the per-service logs use
+      `/nodes/{node}/journal`, which returned 501 without
+      mini-journalreader, so both stayed empty.
+    - New `PVE::InitSystem::read_journal`: LSBService reads the rsyslog
+      files like `dump_syslog` and returns mini-journalreader's plain
+      (`-j`) format (first cursor, lines, last cursor), which the
+      widget-toolkit's journal view accepts, so the UI is unchanged.
+    - A cursor is `rsyslog:<dev>:<inode>:<offset>`, so it survives
+      logrotate renaming `syslog` to `syslog.1`; a start cursor in a file
+      rotated away means everything is newer, an end cursor there that
+      nothing is older.
+    - Supported: `lastentries`, `since`/`until`, start/end cursor,
+      `service` (identifier), `unit` (as `dump_syslog`), `kernel`.
+      Ignored: `priority` (the files don't record it), and the structured
+      output (no colouring, empty identifier and unit filter lists).
+    - The Systemd backend's `read_journal` dies; pve-manager calls
+      mini-journalreader directly there.
+    - pve-manager depends on `libpve-common-perl (>= 9.2.3+devuan2)`.
+    - Tests: 18 in `test/initsystem-test.pl` (cursors, rotation, filters),
+      plus a taint-mode run with a tainted cursor.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs), and the
 `proxmox-perl-rs/pve-rs/.cargo/config.toml` renamed to `config.toml.debian`
@@ -1198,8 +1232,8 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 
 | Repository | Base (`master`) | Steps |
 |---|---|---|
-| pve-common | `9943f6f9` | 1–9, 14, 25, 31, 33–35, 38, 45, 51, 59, 74, 76, 79 |
-| pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84 |
+| pve-common | `9943f6f9` | 1–9, 14, 25, 31, 33–35, 38, 45, 51, 59, 74, 76, 79, 85 |
+| pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84, 85 |
 | pve-cluster | `7091d92e` | 18, 21, 22, 26, 52, 79 |
 | pve-ha-manager | `28c31e41` | 19, 23, 24, 27, 28, 54, 79–81 |
 | qemu-server | `a7b4240b` | 36, 39–41, 55, 63, 79 |

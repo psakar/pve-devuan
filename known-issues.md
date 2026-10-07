@@ -241,6 +241,22 @@ this didn't show with systemd.
 script runs both `pvesh` calls with stdin from `/dev/null`. Not yet
 verified with a reboot.
 
+## Node "System Log" and service logs empty in the web UI
+
+The node's "System Log" panel and the per-service logs (node → System →
+a service's log) showed nothing. Both use the journal API
+(`/nodes/{node}/journal`), served by mini-journalreader from systemd's
+journal; without it the API returned 501. The syslog API, which reads
+`/var/log/syslog`, worked, but the UI doesn't use it.
+
+**Fixed** on 2026-10-07 (pve-common `cccffb1`, `+devuan2`; pve-manager
+`ef8bd820`, in `+devuan3`): without mini-journalreader the journal API
+reads the syslog files via `PVE::InitSystem::read_journal`, in the plain
+format the UI's journal view accepts. The priority filter has no effect
+(the files don't record the priority), lines aren't coloured, and the
+identifier and unit filter lists stay empty. Needs rsyslog (see the install
+prerequisites in `openrc-devuan.md`). Not yet verified in the UI.
+
 ## ZFS pools aren't imported or mounted at boot
 
 Proxmox's ZFS packages (`zfsutils-linux` 2.4.4-pve1 and its libraries,

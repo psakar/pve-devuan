@@ -118,8 +118,8 @@ repositories) is downloaded by `build.sh`'s last step into `repo/` instead.
 | proxmox-backup-qemu | `deps/proxmox-backup-qemu` | libproxmox-backup-qemu0 | |
 | proxmox-websocket-tunnel | `deps/proxmox-websocket-tunnel` | proxmox-websocket-tunnel | |
 | pve-xtermjs | `deps/pve-xtermjs` | pve-xtermjs, proxmox-termproxy | |
-| proxmox-widget-toolkit | `proxmox-widget-toolkit` | proxmox-widget-toolkit | its journal view needs the journal API (501 under LSB) |
-| ui | `ui` | pve-yew-mobile-gui | same journal view gap |
+| proxmox-widget-toolkit | `proxmox-widget-toolkit` | proxmox-widget-toolkit | unchanged: its journal view accepts the journal API's plain format, served from the syslog files under LSB |
+| ui | `ui` | pve-yew-mobile-gui | unchanged: it has no journal view |
 | proxmox-i18n | `deps/proxmox-i18n` | pve-i18n, pve-yew-mobile-i18n | |
 | pve-docs | `deps/pve-docs` | pve-docs, pve-doc-generator | |
 | proxmox-mail-forward | `deps/proxmox-mail-forward` | proxmox-mail-forward | |
