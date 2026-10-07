@@ -218,6 +218,29 @@ pve-ha-manager `21c88ba`, as `+devuan2`): `start` exits 0 if the pid file
 names a running process. The half-configured packages were configured with
 `dpkg --configure -a`; everything is `ii` again.
 
+## Guests weren't started at boot: pve-guests' worker and the console
+
+At boot, the pve-guests init script failed (pve2, `/var/log/boot`):
+
+```
+failed to tcsetpgrp: Inappropriate ioctl for device
+got no worker upid - start worker failed
+ * ERROR: pve-guests failed to start
+```
+
+`pvesh create /nodes/localhost/startall` runs a synchronous worker, and
+pve-common's `fork_worker` gives the worker the terminal when stdin is one
+(`setpgid` and `tcsetpgrp`, `RESTEnvironment.pm`). OpenRC runs init scripts
+with the console as stdin, but it isn't their controlling terminal, so
+`tcsetpgrp` fails with ENOTTY and the worker dies before reporting its task
+ID. No guest marked `onboot` was started, and `stopall` at shutdown would
+have failed the same way. pve-guests.service has stdin on `/dev/null`, so
+this didn't show with systemd.
+
+**Fixed** on 2026-10-07 (pve-manager `82f95a01`, as `+devuan3`): the init
+script runs both `pvesh` calls with stdin from `/dev/null`. Not yet
+verified with a reboot.
+
 ## ZFS pools aren't imported or mounted at boot
 
 Proxmox's ZFS packages (`zfsutils-linux` 2.4.4-pve1 and its libraries,
