@@ -1408,6 +1408,35 @@ ls -d /run/openrc           # exists when booted with OpenRC
 Devuan's default rc is sysv-rc; `apt install openrc` replaces it, followed by
 a reboot.
 
+It also needs a syslog daemon. Without journald, the PVE daemons log
+through syslog (`/dev/log`); a minimal installation has none, and every
+daemon then reports "Unable to open journald … or syslog" and logs nothing:
+
+```
+apt install rsyslog
+ls -l /dev/log                    # exists once rsyslog runs
+```
+
+And the loopback interface up, configured in `/etc/network/interfaces`:
+pvedaemon listens on `127.0.0.1:85` and otherwise fails with "unable to
+create socket - Cannot assign requested address":
+
+```
+ip addr show lo                   # UP, with 127.0.0.1/8
+grep -A1 '^auto lo' /etc/network/interfaces
+```
+
+The file must contain:
+
+```
+auto lo
+iface lo inet loopback
+```
+
+ifupdown2, installed with Proxmox VE, writes its own copy of the
+configuration to `/etc/network/interfaces.new`, applied at the next reboot;
+it must keep these lines too.
+
 #### 1. The local repository
 
 Create `/srv/repo`, owned by the `_apt` user (apt reads local repositories
@@ -1539,6 +1568,24 @@ echo "$IP $FQDN $(hostname)" >> /etc/hosts
 getent hosts "$(hostname)"       # must show the LAN address
 ```
 
+Devuan's corosync (the pins prefer it to Proxmox's) ships a working default
+`/etc/corosync/corosync.conf` (cluster `debian`, single node `node1`), which
+Proxmox's build doesn't. pmxcfs imports it on its first start and runs as a
+member of that fake cluster: "unable to parse cluster config_version", the
+node shows as unknown (`known-issues.md`). So install corosync first, remove
+the file and keep corosync disabled for a standalone node (`pvecm create`
+starts it; enable it then with `update-rc.d corosync enable`):
+
+```
+apt install corosync
+rc-service corosync stop
+[ -e /etc/corosync/corosync.conf ] && mv /etc/corosync/corosync.conf /var/backups/corosync.conf.devuan-default
+update-rc.d corosync disable
+```
+
+`update-rc.d` warns that the current runlevels override the LSB defaults;
+that's the disabling.
+
 Install a mail transport and time synchronization (Proxmox VE needs
 both: notifications are sent by mail, and its login tickets and the cluster
 need a correct clock), then Proxmox VE:
@@ -1556,11 +1603,36 @@ If the installation failed on pve-cluster because of the hostname, fix
 apt -f install
 ```
 
+If pve-cluster was installed before corosync's configuration was removed,
+pmxcfs has imported it; remove it as above, then remove pmxcfs's copy in
+local mode. pmxcfs also refuses to mount on a non-empty `/etc/pve`
+("fuse: mountpoint is not empty"), which happens when something wrote there
+while it wasn't running; move such files aside (look at them first):
+
+```
+rc-service pve-cluster stop; pkill pmxcfs
+ls -la /etc/pve
+mkdir -p /root/etc-pve.stray
+find /etc/pve -mindepth 1 -maxdepth 1 -exec mv {} /root/etc-pve.stray/ \;
+pmxcfs -l                                  # local mode: ignores corosync.conf
+[ -e /etc/pve/corosync.conf ] && mv /etc/pve/corosync.conf /var/backups/pve-corosync.conf.devuan-default
+pkill pmxcfs
+rc-service pve-cluster start
+for s in pvedaemon pveproxy spiceproxy pvestatd pvescheduler; do rc-service $s restart; done
+pvesh get /cluster/status                  # the standalone node, online
+```
+
 Installing ifupdown2 (which replaces ifupdown) reloads the network
 configuration and may report `eth0: dhclient: timeout failed to detect new
 ip addresses` as the address is already assigned; the address stays. It
 also writes `/etc/network/interfaces.new`, applied at the next reboot:
-check it, e.g. for the static address.
+check it, e.g. for the static address and the `lo` lines. If `lo` went
+down (pvedaemon: "Cannot assign requested address"), `ip link set lo up`
+and restart the daemons:
+
+```
+for s in pve-cluster pvedaemon pveproxy spiceproxy pvestatd pvescheduler; do rc-service $s restart; done
+```
 
 #### 5. Verification
 
