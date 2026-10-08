@@ -162,8 +162,9 @@ Code:
   `configs/virtual-function-pinning-helper`): write udev rules
   (`/etc/udev/rules.d/50-pve-<iface>.rules`, `NAME=`) instead of `.link`
   files when not running systemd.
-- ✘ Make `pveceph install` refuse in the lsbservice variant (Ceph is out of
-  scope).
+- ✔ `pveceph install` (also run by the web UI's Ceph wizard) refuses
+  without systemd as init: Ceph is out of scope, its packages only ship
+  units (92).
 - Not needed: `pve8to9`.
 
 Build/packaging:
@@ -186,8 +187,9 @@ Build/packaging:
 - ✔ `libpve-common-perl (>= 9.2.3)` (29).
 - ✔ lintian overrides, `${misc:Pre-Depends}`, and `pvebanner` sourcing
   init-functions (56).
-- ✘ Don't install `proxmox-ve-default.link` in the lsbservice variant, after
-  checking that eudev needs no equivalent.
+- ✔ `proxmox-ve-default.link` (`MACAddressPolicy=none`) is installed for
+  systemd only: eudev reads no `.link` files and assigns bridges no MAC
+  address, so they keep their ports' anyway (92).
 - ✘ Optional: OpenRC-native scripts with `supervise-daemon` for pvedaemon
   and pveproxy (needs pve-common's foreground mode).
 
@@ -1363,6 +1365,22 @@ expects Debian's packaged crates.
     - Install instructions: `apt install proxmox-ve` instead of
       pve-manager.
 
+### Phase 21: pve-manager leftovers
+
+92. **pve-manager** (`e01fa7f3`, `a0d96545`, `1b1b4e63`; `9.2.21+devuan4`):
+    - `configs/Makefile`: the drop-in for systemd's `99-default.link`
+      (`proxmox-ve-default.link`, `MACAddressPolicy=none`) only for
+      `PVE_INIT_SYSTEM=systemd`. eudev has no `.link` support and doesn't
+      set bridge MAC addresses, so the kernel gives bridges their ports'
+      address, which is what the drop-in achieves with systemd-udevd.
+    - `PVE/CLI/pveceph.pm`: `install` dies unless `/run/systemd/system`
+      exists (`sd_booted(3)`'s check), before touching repositories or
+      packages. A runtime check: nothing changes on systemd systems.
+    - Checked: `configs/` installs the drop-in only for systemd;
+      `make check`'s init-system call check passes. Not built or run yet:
+      on pve2, `pveceph install` should fail with "Ceph needs systemd as
+      init system", and `ip link show vmbr0` show the NIC's MAC address.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1371,7 +1389,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | Repository | Base (`master`) | Steps |
 |---|---|---|
 | pve-common | `9943f6f9` | 1–9, 14, 25, 31, 33–35, 38, 45, 51, 59, 74, 76, 79, 85 |
-| pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84, 85 |
+| pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84, 85, 92 |
 | pve-cluster | `7091d92e` | 18, 21, 22, 26, 52, 79 |
 | pve-ha-manager | `28c31e41` | 19, 23, 24, 27, 28, 54, 79–81 |
 | qemu-server | `a7b4240b` | 36, 39–41, 55, 63, 79 |
