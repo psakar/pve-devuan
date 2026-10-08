@@ -1801,6 +1801,22 @@ reboot
 
 After the reboot, `uname -r` shows the `-pve` kernel.
 
+Before that reboot, on a machine booting in legacy BIOS mode from a GPT
+disk (GRUB in a "BIOS boot" partition): some BIOSes, e.g. Fujitsu PRIMERGY
+ones, only list such a disk as bootable when the protective MBR is marked
+active and the BIOS boot partition has the "Legacy BIOS Bootable"
+attribute. Set both (here partition 1 of `/dev/sda`):
+
+```
+parted /dev/sda disk_set pmbr_boot on
+parted /dev/sda set 1 legacy_boot on
+parted /dev/sda print           # Disk Flags: pmbr_boot; 1 … bios_grub, legacy_boot
+```
+
+Don't use `parted … set 1 boot on` on a GPT disk: it turns the partition
+into an EFI System partition, which such a BIOS doesn't boot from either,
+and GRUB can't install to it anymore.
+
 #### 4. Proxmox VE
 
 The hostname must resolve to the machine's LAN address: pmxcfs (pve-cluster)
