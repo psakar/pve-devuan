@@ -13,6 +13,8 @@ set -euo pipefail
 
 REMOTE_MACHINE=${REMOTE_MACHINE:-root@pve2}
 
+info() { printf '\n=== %s\n' "$*"; }
+
 RSYNC=0 UPGRADE=0
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -26,14 +28,21 @@ done
 
 [ -d repo ] || { echo "repo/ not found, run from the build directory" >&2; exit 1; }
 
+info "Creating /srv/repo on $REMOTE_MACHINE"
 ssh "$REMOTE_MACHINE" 'mkdir -p /srv/repo'
 if [ "$RSYNC" = 1 ]; then
-    rsync -a --delete repo/ "$REMOTE_MACHINE:/srv/repo/"
+    info "Copying repo/ to $REMOTE_MACHINE:/srv/repo with rsync --delete"
+    rsync -a --delete --info=stats1 repo/ "$REMOTE_MACHINE:/srv/repo/"
 else
+    info "Copying repo/ to $REMOTE_MACHINE:/srv/repo with scp"
     scp -r repo/* "$REMOTE_MACHINE:/srv/repo/"
 fi
+info "Giving /srv/repo to _apt on $REMOTE_MACHINE"
 ssh "$REMOTE_MACHINE" 'chown -R _apt:root /srv/repo'
 
 if [ "$UPGRADE" = 1 ]; then
+    info "Upgrading $REMOTE_MACHINE: apt update && apt full-upgrade"
     ssh -t "$REMOTE_MACHINE" 'apt update && apt full-upgrade'
+else
+    info "Done; to upgrade, run apt update && apt full-upgrade on $REMOTE_MACHINE (or use --upgrade)"
 fi
