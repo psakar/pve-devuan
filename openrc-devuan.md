@@ -579,9 +579,12 @@ Code: none.
 
 Build/packaging:
 
-- ✘ Profile dropping `Depends: systemd`.
-- ✘ Init script for `ksmtuned`. The upstream tarball has a Red Hat-style
-  `ksmtuned.init` that could be adapted.
+- ✔ `pkg.ksm-control-daemon.lsbservice`: drops `Depends: systemd` and
+  installs `ksmtuned.init` as `/etc/init.d/ksmtuned` instead of the unit
+  (89). Proxmox's `init-script.diff` had already adapted the upstream Red
+  Hat-style script to LSB, but nothing installed it.
+- ✘ Not tested at runtime yet: ksmtuned at boot, KSM starting under memory
+  pressure (`/sys/kernel/mm/ksm/run`).
 
 ### proxmox-firewall (optional, recommended by pve-manager)
 
@@ -1305,6 +1308,27 @@ expects Debian's packaged crates.
     - Install instructions: the corosync workaround (install it first,
       move its configuration aside, disable it) is gone.
 
+### Phase 19: ksm-control-daemon
+
+89. **ksm-control-daemon: init script** (`c6e8891`, `8ff04a2`;
+    `1.5-1+devuan1`):
+    - `pkg.ksm-control-daemon.lsbservice` (`debian/rules`,
+      `debian/control`): installs the patched `ksmtuned.init` as
+      `/etc/init.d/ksmtuned` (`dh_installinit --name=ksmtuned
+      --onlyscripts`: enabled, started and restarted on upgrades), skips
+      `dh_installsystemd`, drops `Depends: systemd`, and adds a lintian
+      override; `${misc:Pre-Depends}` for the init-system-helpers version
+      of the `--skip-systemd-native` snippets.
+    - `init-script-always-start.diff`: the init script no longer requires
+      `START=yes` in `/etc/default/ksmtuned` (policy: disable with
+      `update-rc.d`), so `debian/defaults` stays uninstalled.
+    - `build.sh` builds it after frr; `prepare-build.sh` clones it as a
+      changed repository; the pins keep it from Proxmox's repository.
+    - Built with and without the profile: the default package is
+      unchanged; the lsbservice one has `/etc/init.d/ksmtuned`, no unit and
+      no systemd dependency, and passes lintian (apart from the default
+      build's warnings). Not run yet.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1329,6 +1353,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | proxmox-perl-rs | `38ce5a02` | 79, 82 |
 | frr | `20d9f22` | 86 |
 | corosync-pve | `0d40544` | 88 |
+| ksm-control-daemon | `2349336` | 89 |
 
 All repositories are at `~/proxmox/<name>`.
 
@@ -1375,7 +1400,7 @@ The sections below describe what they do.
   `feature/init-systems-refactoring`, pushed to and tracking their GitHub
   forks `https://github.com/psakar/<name>` (remote `origin`; ifupdown2's and frr's are
   plain repositories, as Proxmox has no GitHub mirror of them). All changed repositories are in
-  `~/proxmox/<name>`, as are those with open plan items (ksm-control-daemon, proxmox-ve, proxmox-kernel-helper,
+  `~/proxmox/<name>`, as are those with open plan items (proxmox-ve, proxmox-kernel-helper,
   pve-vgpu-helper, proxmox-firewall, proxmox-widget-toolkit, `ui/`, and
   zfsonlinux and ceph, out of scope for now). `~/proxmox/deps/` keeps only
   the 23 unchanged repositories of installed packages (see
@@ -1499,8 +1524,9 @@ Each package is built after its build dependencies are installed.
 6. **pve-storage**, then **pve-firewall** and **pve-network**. They depend
    on each other: bootstrap-install one with `--force-depends`, build the
    other, then reinstall both cleanly with apt.
-7. **ifupdown2** (needed once libpve-network-perl is installed), and
-   **frr** (`pkg.frr.lsbservice`).
+7. **ifupdown2** (needed once libpve-network-perl is installed),
+   **frr** (`pkg.frr.lsbservice`) and **ksm-control-daemon**
+   (`pkg.ksm-control-daemon.lsbservice`).
 8. **pve-ha-manager**, **lxc**, **pve-lxc-syscalld**. Build
    pve-lxc-syscalld outside the repository tree (`~/proxmox/build/`),
    because cargo picks up `.cargo/config.toml` from parent directories.
@@ -1658,7 +1684,7 @@ Package: systemd systemd-* libsystemd* udev libudev* libpam-systemd libnss-syste
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
-Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum*
+Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum* ksm-control-daemon
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
@@ -1747,7 +1773,7 @@ need a correct clock), then Proxmox VE:
 
 ```
 apt install postfix chrony
-apt install pve-manager
+apt install pve-manager ksm-control-daemon
 dpkg --audit                     # empty when everything is configured
 ```
 
