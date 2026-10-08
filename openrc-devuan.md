@@ -1380,6 +1380,19 @@ expects Debian's packaged crates.
       `make check`'s init-system call check passes. Not built or run yet:
       on pve2, `pveceph install` should fail with "Ceph needs systemd as
       init system", and `ip link show vmbr0` show the NIC's MAC address.
+### Phase 22: fixes from the first test round on pve2
+
+93. **pve-common `68a4417` (`9.2.3+devuan3`): LSBService: correct enabled
+    state.** `service_enabled()` checked the sysv-rc start links with
+    `glob()` in scalar context, an iterator that keeps its state between
+    calls, so consecutive `service_status` calls (the services list of the
+    web UI and API) reported enabled/disabled for the wrong script. Now in
+    list context; a test checks several services one after another (all
+    133 InitSystem tests pass).
+94. **proxmox-kernel-helper `e44368f` (`9.2.0+devuan2`):
+    proxmox-boot-cleanup's init script gets a `status` action**, reporting
+    success like the one-shot unit (`RemainAfterExit=yes`); it printed the
+    usage and failed before.
 
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
@@ -1388,7 +1401,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 
 | Repository | Base (`master`) | Steps |
 |---|---|---|
-| pve-common | `9943f6f9` | 1–9, 14, 25, 31, 33–35, 38, 45, 51, 59, 74, 76, 79, 85 |
+| pve-common | `9943f6f9` | 1–9, 14, 25, 31, 33–35, 38, 45, 51, 59, 74, 76, 79, 85, 93 |
 | pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84, 85, 92 |
 | pve-cluster | `7091d92e` | 18, 21, 22, 26, 52, 79 |
 | pve-ha-manager | `28c31e41` | 19, 23, 24, 27, 28, 54, 79–81 |
@@ -1406,7 +1419,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | frr | `20d9f22` | 86 |
 | corosync-pve | `0d40544` | 88 |
 | ksm-control-daemon | `2349336` | 89 |
-| proxmox-kernel-helper | `7bdc4db` | 90 |
+| proxmox-kernel-helper | `7bdc4db` | 90, 94 |
 | proxmox-ve | `75f62ea` | 91 |
 
 All repositories are at `~/proxmox/<name>`.
@@ -1914,10 +1927,12 @@ pins of step 2 first.
 
 In priority order. ✘ means open; the step numbers refer to Part B.
 
-1. ✘ Full reboot:
-   - boot order (pvenetcommit → networking → pve-cluster → corosync →
-     daemons → pve-guests)
-   - shutdown order (pve-guests stopall before daemons and lxc)
+1. Full reboot:
+   - ✔ boot order (pvenetcommit → networking → pve-cluster → corosync →
+     daemons → pve-guests), and guests marked to start at boot started
+     (pve2, 2026-10-08)
+   - ✘ shutdown order (pve-guests stopall before daemons and lxc); the
+     guests were shut down at halt, the order of the rest not checked
 2. ✘ VM lifecycle (start/stop/start via the API done, see step 76):
    - start/stop/reboot (scope in `qemu.slice`)
    - CPU limit hotplug (step 36)

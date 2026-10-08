@@ -68,7 +68,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 
 | Repository | Path | Source package | Binary packages used | Commits on branch |
 |---|---|---|---|---|
-| pve-common | `pve-common` | libpve-common-perl | libpve-common-perl | 22 |
+| pve-common | `pve-common` | libpve-common-perl | libpve-common-perl | 24 |
 | pve-manager | `pve-manager` | pve-manager | pve-manager | 25 |
 | pve-cluster | `pve-cluster` | pve-cluster | pve-cluster, libpve-cluster-perl, libpve-cluster-api-perl, libpve-notify-perl | 6 |
 | pve-ha-manager | `pve-ha-manager` | pve-ha-manager | pve-ha-manager | 9 |
@@ -83,7 +83,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 | frr | `frr` | frr | frr, frr-pythontools (and frr-doc, frr-snmp, frr-rpki-rtrlib, frr-test-tools) | 3 |
 | corosync-pve | `corosync-pve` | corosync | corosync, libcfg7, libcmap4, libcorosync-common4, libcpg4, libquorum5, libvotequorum8 (and corosync-notifyd, the -dev packages, …) | 3 |
 | ksm-control-daemon | `ksm-control-daemon` | ksm-control-daemon | ksm-control-daemon | 2 |
-| proxmox-kernel-helper | `proxmox-kernel-helper` | proxmox-kernel-helper | proxmox-kernel-helper | 2 |
+| proxmox-kernel-helper | `proxmox-kernel-helper` | proxmox-kernel-helper | proxmox-kernel-helper | 3 |
 | proxmox-ve | `proxmox-ve` | proxmox-ve | proxmox-ve | 2 |
 | pve-qemu | `pve-qemu` | pve-qemu-kvm | pve-qemu-kvm (11.0.3-4+devuan1); branch from `stable-11.0` at `7fccdcf` | 2 |
 | proxmox-rs | `proxmox-rs` | Rust crates (`proxmox-apt`, `proxmox-apt-api-types`, `proxmox-log`, …) | compiled into libpve-rs-perl, see section 2 | 5 |
