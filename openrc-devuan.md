@@ -559,7 +559,8 @@ Code: none.
 
 Build/packaging:
 
-- ✘ `systemd-sysv <!pkg.proxmox-ve.lsbservice>`.
+- ✔ `systemd-sysv <!pkg.proxmox-ve.lsbservice>` (91), so
+  `apt install proxmox-ve` works as on Debian.
 
 ### proxmox-kernel-helper
 
@@ -569,9 +570,12 @@ only for systemd-boot setups.
 
 Build/packaging:
 
-- ✘ Profile dropping `Depends: systemd`.
-- ✘ Replace `proxmox-boot-cleanup.service` with an init script, or a call
-  from the kernel hooks.
+- ✔ `pkg.proxmox-kernel-helper.lsbservice`: drops `Depends: systemd` and
+  installs an init script instead of `proxmox-boot-cleanup.service` (90).
+  The kernel hooks can't replace it: it runs at boot, unpinning a kernel
+  pinned for that boot only (`proxmox-boot-tool kernel pin --next-boot`).
+- ✘ Not tested at runtime yet: `kernel pin --next-boot` and the cleanup at
+  the following boot.
 
 ### ksm-control-daemon, packaging-only
 
@@ -1329,6 +1333,36 @@ expects Debian's packaged crates.
       no systemd dependency, and passes lintian (apart from the default
       build's warnings). Not run yet.
 
+### Phase 20: proxmox-kernel-helper and proxmox-ve
+
+90. **proxmox-kernel-helper: init script** (`7c29c12`, `52b99ed`;
+    `9.2.0+devuan1`):
+    - `pkg.proxmox-kernel-helper.lsbservice` (`debian/rules`,
+      `debian/control`): installs
+      `debian/proxmox-kernel-helper.proxmox-boot-cleanup.init` as
+      `/etc/init.d/proxmox-boot-cleanup` (`dh_installinit
+      --name=proxmox-boot-cleanup --no-start`: enabled, not run on
+      installation, like the unit's `--no-start`), removes the unit after
+      `dh_install`, skips `dh_installsystemd`, drops `Depends: systemd`, and
+      adds a lintian override.
+    - The init script: a one-shot action at boot (start only; stop does
+      nothing). With `/etc/kernel/next-boot-pin`, it runs
+      `proxmox-boot-tool kernel unpin --next-boot` and `proxmox-boot-tool
+      refresh`, like the unit.
+    - Built with and without the profile: the default package is
+      unchanged; the lsbservice one has the init script, no unit and no
+      systemd dependency, and passes lintian (apart from the default
+      build's warning). Not run yet.
+91. **proxmox-ve: profile** (`b5073c9`, `7627ce2`; `9.2.0+devuan1`):
+    `pkg.proxmox-ve.lsbservice` drops `Depends: systemd-sysv`
+    (`debian/control`; `debian/rules` only documents it). Built with and
+    without the profile; both pass lintian.
+    - `build.sh` builds both after the kernel download;
+      `prepare-build.sh` clones them as changed repositories, and the pins
+      keep them from Proxmox's repository.
+    - Install instructions: `apt install proxmox-ve` instead of
+      pve-manager.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1354,6 +1388,8 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | frr | `20d9f22` | 86 |
 | corosync-pve | `0d40544` | 88 |
 | ksm-control-daemon | `2349336` | 89 |
+| proxmox-kernel-helper | `7bdc4db` | 90 |
+| proxmox-ve | `75f62ea` | 91 |
 
 All repositories are at `~/proxmox/<name>`.
 
@@ -1383,6 +1419,8 @@ to work in:
   builds nothing: it downloads Proxmox's kernel (proxmox-default-kernel and
   the Proxmox packages it depends on: the kernel series package, the kernel
   image, pve-firmware) into `repo/`, as installing Proxmox VE needs it.
+  The last two, `proxmox-kernel-helper` and `proxmox-ve`, build the
+  packages for `apt install proxmox-ve`.
 - `update-repo.sh` copies `repo/` to `/srv/repo` on an install machine
   (`REMOTE_MACHINE`, by default `root@pve2`) with scp, or with
   `rsync --delete` (`--rsync`), and gives it to `_apt`; `--upgrade` then runs
@@ -1398,10 +1436,10 @@ The sections below describe what they do.
   `upstream` in the top-level repositories (proxmox-rs from
   `https://github.com/proxmox/proxmox-rs.git`), with the changed ones on
   `feature/init-systems-refactoring`, pushed to and tracking their GitHub
-  forks `https://github.com/psakar/<name>` (remote `origin`; ifupdown2's and frr's are
-  plain repositories, as Proxmox has no GitHub mirror of them). All changed repositories are in
-  `~/proxmox/<name>`, as are those with open plan items (proxmox-ve, proxmox-kernel-helper,
-  pve-vgpu-helper, proxmox-firewall, proxmox-widget-toolkit, `ui/`, and
+  forks `https://github.com/psakar/<name>` (remote `origin`; ifupdown2's, frr's,
+  proxmox-kernel-helper's and proxmox-ve's are plain repositories, as
+  Proxmox has no GitHub mirror of them). All changed repositories are in
+  `~/proxmox/<name>`, as are those with open plan items (pve-vgpu-helper, proxmox-firewall, proxmox-widget-toolkit, `ui/`, and
   zfsonlinux and ceph, out of scope for now). `~/proxmox/deps/` keeps only
   the 23 unchanged repositories of installed packages (see
   `repositories.md`); the others were deleted on 2026-10-03.
@@ -1533,6 +1571,9 @@ Each package is built after its build dependencies are installed.
 9. **pve-container**, **qemu-server**.
 10. **pve-manager** (`RELAX_BUILD_DEPS=1 BUILD_PARALLEL=1`; needs fakeroot
     and proxmox-biome).
+11. **proxmox-kernel-helper** (`pkg.proxmox-kernel-helper.lsbservice`) and
+    **proxmox-ve** (`pkg.proxmox-ve.lsbservice`), after downloading
+    Proxmox's kernel.
 
 ### Installation
 
@@ -1544,7 +1585,8 @@ Each package is built after its build dependencies are installed.
 2. After bootstrapping with `--force-depends`, clean up with `dpkg -r` on
    the bootstrapped package and an apt reinstall. apt refuses to install
    anything while dependencies are broken.
-3. Run `apt-get install pve-manager` from the local repo. Effects:
+3. Run `apt-get install proxmox-ve ksm-control-daemon` from the local repo.
+   Effects:
    - ifupdown is replaced by ifupdown2; purge ifupdown.
    - Devuan's lxc/liblxc are replaced by lxc-pve. Where Devuan's lxc had
      been installed, `/etc/init.d/lxc` and `lxc-net` may be left with mode
@@ -1554,7 +1596,7 @@ Each package is built after its build dependencies are installed.
    - `rc-service <name> status` for pve-cluster, pvedaemon, pveproxy,
      spiceproxy, pvestatd, pvescheduler, pve-firewall, pvefw-logger,
      pve-ha-crm, pve-ha-lrm, watchdog-mux, pve-lxc-syscalld, qmeventd, lxc,
-     lxcfs.
+     lxcfs, ksmtuned.
    - `https://<host>:8006` answers.
    - `pvesh get /nodes/<node>/services` reports the services.
 
@@ -1684,7 +1726,7 @@ Package: systemd systemd-* libsystemd* udev libudev* libpam-systemd libnss-syste
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
-Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum* ksm-control-daemon
+Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum* ksm-control-daemon proxmox-kernel-helper proxmox-ve
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
@@ -1773,9 +1815,15 @@ need a correct clock), then Proxmox VE:
 
 ```
 apt install postfix chrony
-apt install pve-manager ksm-control-daemon
+apt install proxmox-ve ksm-control-daemon
 dpkg --audit                     # empty when everything is configured
+update-grub
 ```
+
+ksm-control-daemon (KSM tuning, `ksmtuned`) is installed explicitly: as in
+Proxmox's repository, no package depends on it or recommends it. proxmox-ve's
+`/etc/default/grub.d/proxmox-ve.cfg` names the boot menu entries "Proxmox
+VE" and disables os-prober; `update-grub` applies it.
 
 If the installation failed on pve-cluster because of the hostname, fix
 `/etc/hosts` as above, then finish it with:

@@ -41,6 +41,7 @@ STEPS=(
     libpve-rs-perl pve-common pve-qemu corosync-pve pve-cluster pve-firewall pve-network
     pve-storage ifupdown2 frr ksm-control-daemon lxc pve-lxc-syscalld pve-ha-manager
     qemu-server pve-container pve-manager proxmox-default-kernel
+    proxmox-kernel-helper proxmox-ve
 )
 
 FROM='' ONLY='' INSTALL=0 KEEP=0
@@ -361,6 +362,11 @@ step_proxmox-default-kernel() {
         || die "proxmox-default-kernel not available to apt from $R"
     echo "=== proxmox-default-kernel: $n packages from Proxmox added to $R" | tee -a "$LOG"
 }
+
+# proxmox-kernel-helper (proxmox-boot-tool and the kernel hooks), and the
+# proxmox-ve meta package, which depends on it, to install Proxmox VE as usual
+step_proxmox-kernel-helper() { repo_build proxmox-kernel-helper; }
+step_proxmox-ve() { repo_build proxmox-ve; }
 
 # allow sourcing the functions, e.g. for testing
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0

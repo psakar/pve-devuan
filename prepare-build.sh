@@ -45,6 +45,7 @@ BUILD_REPOS=(
     pve-common pve-manager pve-cluster pve-ha-manager qemu-server pve-container
     pve-storage pve-firewall pve-network pve-lxc-syscalld lxc ifupdown2 pve-qemu
     proxmox-rs proxmox-perl-rs frr corosync-pve ksm-control-daemon
+    proxmox-kernel-helper proxmox-ve
 )
 # Unchanged repositories the build needs as sources: libpve-rs-perl is built
 # against their crates (with proxmox-rs'), cloned from Proxmox's repository
@@ -62,7 +63,6 @@ declare -A BASE_REF=(
 # Repositories with open plan items (init-system work still to do), cloned from
 # Proxmox's repository; ui/ holds several repositories
 PLANNED_REPOS=(
-    proxmox-ve proxmox-kernel-helper
     pve-vgpu-helper proxmox-firewall proxmox-widget-toolkit zfsonlinux ceph
 )
 PLANNED_UI_REPOS=(
@@ -400,7 +400,7 @@ Package: systemd systemd-* libsystemd* udev libudev* libpam-systemd libnss-syste
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
-Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum* ksm-control-daemon
+Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum* ksm-control-daemon proxmox-kernel-helper proxmox-ve
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
