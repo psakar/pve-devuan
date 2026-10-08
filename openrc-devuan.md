@@ -158,10 +158,16 @@ Code:
   `PVE::InitSystem::read_journal` (85); it returned 501 before, and the
   web UI's node "System Log" and service logs stayed empty.
 - ✔ `test/check-init-system-calls.sh` in `make check` (13).
-- ✘ NIC name pinning (`PVE/CLI/pve_network_interface_pinning.pm`,
-  `configs/virtual-function-pinning-helper`): write udev rules
-  (`/etc/udev/rules.d/50-pve-<iface>.rules`, `NAME=`) instead of `.link`
-  files when not running systemd.
+- ✔ NIC name pinning: `pve-network-interface-pinning generate` refuses
+  without systemd as init (95). It writes systemd `.link` files, which eudev
+  ignores, and rewrites `/etc/network/interfaces.new` and the SDN
+  configuration to the new names, so the node would have no network after
+  the reboot. Not needed on Devuan: the reason for the tool, systemd's
+  changing naming schemes, doesn't apply to eudev's kernel names.
+  - Optional, not planned: pinning through udev rules
+    (`/etc/udev/rules.d/50-pve-<iface>.rules`, `NAME=`), and the same for
+    `configs/virtual-function-pinning-helper` (which only acts on pinned
+    interfaces).
 - ✔ `pveceph install` (also run by the web UI's Ceph wizard) refuses
   without systemd as init: Ceph is out of scope, its packages only ship
   units (92).
@@ -1394,6 +1400,13 @@ expects Debian's packaged crates.
     success like the one-shot unit (`RemainAfterExit=yes`); it printed the
     usage and failed before.
 
+95. **pve-manager `8c407b80`, `f2c32987` (`9.2.21+devuan5`):
+    `pve-network-interface-pinning generate` dies unless
+    `/run/systemd/system` exists, before writing anything, like `pveceph
+    install` (92). Checked on the laptop (no systemd): it refuses with
+    "interface name pinning needs systemd-udevd, but this system wasn't
+    booted with systemd".
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1402,7 +1415,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | Repository | Base (`master`) | Steps |
 |---|---|---|
 | pve-common | `9943f6f9` | 1–9, 14, 25, 31, 33–35, 38, 45, 51, 59, 74, 76, 79, 85, 93 |
-| pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84, 85, 92 |
+| pve-manager | `58350116` | 10–13, 15–17, 20, 29, 30, 32, 37, 42, 56, 64, 65, 69, 79–81, 84, 85, 92, 95 |
 | pve-cluster | `7091d92e` | 18, 21, 22, 26, 52, 79 |
 | pve-ha-manager | `28c31e41` | 19, 23, 24, 27, 28, 54, 79–81 |
 | qemu-server | `a7b4240b` | 36, 39–41, 55, 63, 79 |
