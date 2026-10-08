@@ -1349,6 +1349,18 @@ The sections below describe what they do.
 - Build tools: `build-essential devscripts equivs fakeroot lintian
   apt-utils`, plus `rustc-web` 1.96 (replaces Devuan's `rustc`/`cargo`)
   for the Rust packages.
+- **No elogind PAM session support** (`libpam-elogind`) on the build
+  machine. Its dependency `libelogind-compat` replaces `libsystemd0`
+  (`Provides: libsystemd0 (= 255.17)`), and installing it removes
+  `libsystemd-dev`, which needs the real `libsystemd0` of the same
+  version. pve-qemu, pve-lxc-syscalld and corosync-pve build-depend on
+  `libsystemd-dev`, so they can't be built while it's installed (their
+  `<pkg>-build-deps` package is removed with it). Devuan's `dummy-logind`
+  satisfies logind dependencies instead; to go back:
+  `apt install libsystemd0 libsystemd-dev dummy-logind`. On the install
+  machines `libpam-elogind` should be fine: `libelogind-compat`'s
+  `libsystemd.so.0` exports the `sd_journal_stream_fd` pve-qemu-kvm links
+  (not tested with a running VM).
 - **Two local apt repositories,** both enabled in
   `/etc/apt/sources.list.d/pve-devuan-local.list`
   (`deb [trusted=yes] file:<dir> ./`):
