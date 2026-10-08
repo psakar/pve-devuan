@@ -42,7 +42,7 @@ the top level of `~/proxmox`; the others are in `deps/`.
 | ifupdown2 | `~/proxmox/ifupdown2` | submodule `ifupdown2` (mirror_ifupdown2) | done: init script, start-networking patch | 1 |
 | pve-qemu | `~/proxmox/pve-qemu` | submodule `qemu` (mirror_qemu), patches | done: stderr syslog fallback patch | 1 |
 | frr | `~/proxmox/frr` | submodule `frr` (mirror_frr) | done: init script, profile | 1 |
-| corosync-pve | `~/proxmox/corosync-pve` | submodule `upstream` (mirror_corosync) | planned: init script, profile | 4 |
+| corosync-pve | `~/proxmox/corosync-pve` | submodule `upstream` (mirror_corosync) | done: init script, profile | 1 |
 | ksm-control-daemon | `~/proxmox/ksm-control-daemon` | tarball `ksm-control-scripts.org.tar.gz` | planned: init script, profile | 4 |
 | proxmox-ve | `~/proxmox/proxmox-ve` | none: meta package, only `debian/` | planned: profile dropping `systemd-sysv` | 4 |
 | zfsonlinux | `~/proxmox/zfsonlinux` | submodule `upstream` (mirror_zfs) | planned, but out of scope | 3 |
@@ -60,7 +60,7 @@ proxmox-acme (acme.sh submodule for the DNS plugins), pve-xtermjs (xterm.js
 packaging next to its own termproxy), proxmox-backup-qemu (proxmox-backup
 submodule). All other repositories listed below are Proxmox's own code.
 
-## 1. Changed for the init system (15)
+## 1. Changed for the init system (16)
 
 Packages built from them are installed here: with their `pkg.<source>.lsbservice`
 profile where they have one, pve-qemu with a local `+devuan1` version, and
@@ -81,6 +81,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 | lxc | `lxc` | lxc-pve | lxc-pve | 4 |
 | ifupdown2 | `ifupdown2` | ifupdown2 | ifupdown2 | 3 |
 | frr | `frr` | frr | frr, frr-pythontools (and frr-doc, frr-snmp, frr-rpki-rtrlib, frr-test-tools) | 3 |
+| corosync-pve | `corosync-pve` | corosync | corosync, libcfg7, libcmap4, libcorosync-common4, libcpg4, libquorum5, libvotequorum8 (and corosync-notifyd, the -dev packages, …) | 3 |
 | pve-qemu | `pve-qemu` | pve-qemu-kvm | pve-qemu-kvm (11.0.3-4+devuan1); branch from `stable-11.0` at `7fccdcf` | 2 |
 | proxmox-rs | `proxmox-rs` | Rust crates (`proxmox-apt`, `proxmox-apt-api-types`, `proxmox-log`, …) | compiled into libpve-rs-perl, see section 2 | 5 |
 
@@ -104,6 +105,7 @@ repositories) is downloaded by `build.sh`'s last step into `repo/` instead.
 | proxmox-acme | `proxmox-acme` | libproxmox-acme-perl, libproxmox-acme-plugins | |
 | proxmox-perl-rs | `proxmox-perl-rs` | libproxmox-rs-perl | libpve-rs-perl from the same repository is built here (section 2) |
 | pve-apiclient | `deps/pve-apiclient` | libpve-apiclient-perl | |
+| kronosnet | not cloned | libknet1t64, libnozzle1t64 (build: libknet-dev, libnozzle-dev) | 1.35 for Proxmox's corosync (needs ≥ 1.32, Devuan has 1.31); pinned to 600 like the Ceph libraries |
 | pve-http-server | `deps/pve-http-server` | libpve-http-server-perl | |
 | spiceterm | `deps/spiceterm` | spiceterm | |
 | vncterm | `deps/vncterm` | vncterm | |
@@ -140,7 +142,6 @@ repositories) is downloaded by `build.sh`'s last step into `repo/` instead.
 | ksm-control-daemon | `ksm-control-daemon` | KSM tuning (`ksmtuned`), needed by `proxmox-ve` | `Depends: systemd`, unit only |
 | pve-vgpu-helper | `pve-vgpu-helper` | `pve-nvidia-vgpu-helper`, recommended by pve-manager | `Depends: systemd`, `pve-nvidia-sriov@.service` |
 | proxmox-mini-journalreader | `deps/proxmox-mini-journalreader` | journal API backend; dropped by the lsbservice profile | reads the systemd journal; no replacement needed |
-| corosync-pve | `corosync-pve` | Proxmox's corosync build, to replace Devuan's, whose default `corosync.conf` makes pmxcfs start a fake cluster | needs an lsbservice profile with an init script (units only) |
 | lxcfs | `deps/lxcfs` | Proxmox's lxcfs build | Devuan's own package (with init script) is used instead |
 
 ## Not relevant

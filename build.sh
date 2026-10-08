@@ -38,7 +38,7 @@ LOG=$BASE/build-logs/build.log
 NPROC=$(nproc)
 
 STEPS=(
-    libpve-rs-perl pve-common pve-qemu pve-cluster pve-firewall pve-network
+    libpve-rs-perl pve-common pve-qemu corosync-pve pve-cluster pve-firewall pve-network
     pve-storage ifupdown2 frr lxc pve-lxc-syscalld pve-ha-manager qemu-server
     pve-container pve-manager proxmox-default-kernel
 )
@@ -250,6 +250,8 @@ step_libpve-rs-perl() {
 }
 
 step_pve-qemu() { repo_build pve-qemu BUILD_PARALLEL="$NPROC"; }
+# before pve-cluster, whose build and pmxcfs use corosync's libraries
+step_corosync-pve() { repo_build corosync-pve BUILD_PARALLEL="$NPROC"; }
 
 step_pve-cluster() {
     check_hostname

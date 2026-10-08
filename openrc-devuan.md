@@ -359,23 +359,25 @@ Code: none.
 
 Build/packaging:
 
-- ✘ `pkg.corosync.lsbservice` profile, to use Proxmox's corosync instead of
-  Devuan's.
+- ✔ `pkg.corosync.lsbservice` profile, so Proxmox's corosync is used
+  instead of Devuan's (88).
   - Devuan's ships a working default `/etc/corosync/corosync.conf`.
     pmxcfs then starts in cluster mode for a fake cluster `debian`/`node1`,
     and the node shows as `unknown` (`known-issues.md`). Proxmox's build
     ships that file only as an example.
-  - Add `debian/corosync.init`, based on Devuan's script, mirroring
-    Proxmox's unit patch `0002-only-start-corosync.service-if-conf-exists`:
-    exit 0 without starting if `/etc/corosync/corosync.conf` is missing.
-    That way it can stay enabled at boot, and `pvecm create`/`add` don't
-    have to enable it.
-  - Install the init script instead of the units with the profile; add a
-    lintian override and `${misc:Pre-Depends}`. Check `corosync-notifyd.init`.
-  - Pin or depend so that Proxmox's corosync wins over Devuan's
-    (pve-cluster: `corosync (>= <pve version>)`, or the local repo's
-    priority). This replaces the manual fix on the test machine; afterwards
-    re-enable corosync at boot (`update-rc.d corosync enable`).
+  - `debian/corosync.corosync.init`, installed with the profile instead of
+    the units, mirrors the unit with Proxmox's patch
+    `0002-only-start-corosync.service-if-conf-exists`: without
+    `/etc/corosync/corosync.conf` (or with `nocluster`), it exits 0 without
+    starting corosync, so it stays enabled at boot and `pvecm
+    create`/`add` only start it. corosync-notifyd already had an init
+    script in both builds.
+  - It needs kronosnet 1.32 or newer, Devuan has 1.31: Proxmox's libknet
+    and libnozzle are fetched (build) and pinned to 600 (install).
+  - The pins keep corosync and its libraries from Proxmox's repository and
+    give the local build priority over Devuan's.
+  - ✘ Not tested at runtime yet: a cluster (`pvecm create`), corosync at
+    boot and shutdown.
 - Alternative (not chosen): pve-cluster's lsbservice postinst sets Devuan's
   unmodified default config aside (detected by its dpkg conffile checksum).
 
@@ -1272,6 +1274,37 @@ expects Debian's packaged crates.
     `enable_service`, as `systemctl enable --now frr` does, instead of
     warning and running the script.
 
+### Phase 18: corosync
+
+88. **corosync-pve: init script** (`d3a442d`, `09f07c9`, `3b59a8a`;
+    `3.1.10-pve3+devuan1`):
+    - Absolute URL of the `upstream` submodule, as in step 83.
+    - `pkg.corosync.lsbservice` (`debian/rules`): installs
+      `debian/corosync.corosync.init` as `/etc/init.d/corosync` with
+      `dh_installinit -pcorosync --name=corosync` (enabled, started and
+      restarted on upgrades), removes the units of corosync and
+      corosync-notifyd after `dh_install`, skips `dh_installsystemd`, and
+      adds lintian overrides for both packages.
+    - The init script: no start without `/etc/corosync/corosync.conf` or
+      with `nocluster` (exit 0, a warning); start waits for corosync's IPC
+      (`corosync-cpgtool`, up to `COROSYNC_INIT_TIMEOUT`, like
+      `Type=notify`); stop runs `corosync-cfgtool -H --force` first, like
+      `ExecStop=`; reads `/etc/default/corosync`.
+    - Needs Proxmox's kronosnet (`libknet1t64`, `libknet-dev`,
+      `libnozzle1t64`, `libnozzle-dev`, 1.35): fetched by
+      `prepare-build.sh` and pinned to 600 like the Ceph libraries, in the
+      build's fetch configuration and on the install machines.
+    - `build.sh` builds it after pve-qemu, before pve-cluster (which builds
+      against its libraries); `prepare-build.sh` clones it as a changed
+      repository; the pins keep corosync, `corosync-*` and its libraries
+      from Proxmox's repository.
+    - Built with and without the profile: the default packages are
+      unchanged; the lsbservice ones have `/etc/init.d/corosync` and no
+      units, and pass lintian. The script's start conditions were checked
+      with stub paths; corosync itself not run yet.
+    - Install instructions: the corosync workaround (install it first,
+      move its configuration aside, disable it) is gone.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1295,6 +1328,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | pve-qemu | `7fccdcf` (stable-11.0) | 75, 83 |
 | proxmox-perl-rs | `38ce5a02` | 79, 82 |
 | frr | `20d9f22` | 86 |
+| corosync-pve | `0d40544` | 88 |
 
 All repositories are at `~/proxmox/<name>`.
 
@@ -1341,7 +1375,7 @@ The sections below describe what they do.
   `feature/init-systems-refactoring`, pushed to and tracking their GitHub
   forks `https://github.com/psakar/<name>` (remote `origin`; ifupdown2's and frr's are
   plain repositories, as Proxmox has no GitHub mirror of them). All changed repositories are in
-  `~/proxmox/<name>`, as are those with open plan items (corosync-pve, ksm-control-daemon, proxmox-ve, proxmox-kernel-helper,
+  `~/proxmox/<name>`, as are those with open plan items (ksm-control-daemon, proxmox-ve, proxmox-kernel-helper,
   pve-vgpu-helper, proxmox-firewall, proxmox-widget-toolkit, `ui/`, and
   zfsonlinux and ceph, out of scope for now). `~/proxmox/deps/` keeps only
   the 23 unchanged repositories of installed packages (see
@@ -1437,7 +1471,7 @@ Each package is built after its build dependencies are installed.
    proxmox-biome, and libpve-apiclient-perl, libpve-http-server-perl,
    spiceterm, vncterm, libjs-extjs, fonts-font-logos, libjs-qrcodejs,
    novnc-pve, perlmod-bin, libproxmox-acme-perl, libproxmox-acme-plugins,
-   libproxmox-rs-perl.
+   libproxmox-rs-perl, and kronosnet (libknet, libnozzle) for corosync.
 2. **proxmox-perl-rs** → libpve-rs-perl, first and without its tests
    (`nocheck`): pve-common's build needs Proxmox's libproxmox-rs-perl,
    which depends on libpve-rs-perl. libpve-rs-perl's build itself needs
@@ -1453,7 +1487,9 @@ Each package is built after its build dependencies are installed.
    from crates.io), and whose `debian/rules` doesn't set up the Debian
    registry. The repository stays unchanged.
 3. **pve-common** (lsbservice) → libpve-common-perl.
-4. **pve-qemu** → pve-qemu-kvm (stderr patch), based on `stable-11.0`.
+4. **pve-qemu** → pve-qemu-kvm (stderr patch), based on `stable-11.0`,
+   then **corosync-pve** (`pkg.corosync.lsbservice`), whose libraries
+   pve-cluster builds against.
 5. **pve-cluster**, with `WITH_TESTS=1 BUILD_PARALLEL=1`:
    - The `check` target generates `IPCC.so`/`IPCConst.pm`, and a parallel
      build races on `PVE::IPCC`.
@@ -1622,12 +1658,17 @@ Package: systemd systemd-* libsystemd* udev libudev* libpam-systemd libnss-syste
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
-Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-*
+Package: libpve-common-perl pve-manager pve-cluster libpve-cluster-perl libpve-cluster-api-perl libpve-notify-perl pve-ha-manager pve-ha-simulator qemu-server pve-container libpve-storage-perl pve-firewall libpve-network-perl libpve-network-api-perl pve-lxc-syscalld lxc-pve lxc-pve-dev libpve-rs-perl pve-qemu-kvm ifupdown2 frr frr-* corosync corosync-* libcfg* libcmap* libcorosync-common* libcpg* libquorum* libsam* libvotequorum*
 Pin: origin download.proxmox.com
 Pin-Priority: -1
 
 # Proxmox's packages need Ceph 19 (squid) libraries, Devuan has 18 (reef)
 Package: librados* librbd* libcephfs* librgw* libradosstriper* libceph* python3-ceph* python3-rados python3-rbd python3-cephfs python3-rgw ceph-common ceph-fuse libsqlite3-mod-ceph
+Pin: origin download.proxmox.com
+Pin-Priority: 600
+
+# Proxmox's corosync needs kronosnet 1.32 or newer, Devuan has 1.31
+Package: libknet* libnozzle*
 Pin: origin download.proxmox.com
 Pin-Priority: 600
 EOF
@@ -1642,6 +1683,12 @@ EOF
   10.3.1-1+pve2~)`, which Devuan's frr (10.3) doesn't satisfy, so apt would
   otherwise take Proxmox's frr, which has only systemd units, no init
   script; with the pin, frr comes from `/srv/repo`.
+- The corosync packages in that list: Devuan's corosync would otherwise be
+  preferred (priority 500 over Proxmox's 100), and it ships a default
+  `/etc/corosync/corosync.conf` that pmxcfs takes for a cluster
+  (`known-issues.md`); the one from `/srv/repo` doesn't. It needs
+  Proxmox's kronosnet (`libknet*`, `libnozzle*`), hence their 600 pin, like
+  the Ceph libraries'.
 - A newer unchanged Proxmox package may need a newer version of one built
   here; apt then holds it back until that's rebuilt.
 
@@ -1690,23 +1737,9 @@ echo "$IP $FQDN $(hostname)" >> /etc/hosts
 getent hosts "$(hostname)"       # must show the LAN address
 ```
 
-Devuan's corosync (the pins prefer it to Proxmox's) ships a working default
-`/etc/corosync/corosync.conf` (cluster `debian`, single node `node1`), which
-Proxmox's build doesn't. pmxcfs imports it on its first start and runs as a
-member of that fake cluster: "unable to parse cluster config_version", the
-node shows as unknown (`known-issues.md`). So install corosync first, remove
-the file and keep corosync disabled for a standalone node (`pvecm create`
-starts it; enable it then with `update-rc.d corosync enable`):
-
-```
-apt install corosync
-rc-service corosync stop
-[ -e /etc/corosync/corosync.conf ] && mv /etc/corosync/corosync.conf /var/backups/corosync.conf.devuan-default
-update-rc.d corosync disable
-```
-
-`update-rc.d` warns that the current runlevels override the LSB defaults;
-that's the disabling.
+corosync comes from `/srv/repo`, without a configuration: its init script
+is enabled, but doesn't start corosync until the node is part of a cluster
+(`pvecm create`/`add` write `/etc/corosync/corosync.conf`).
 
 Install a mail transport and time synchronization (Proxmox VE needs
 both: notifications are sent by mail, and its login tickets and the cluster
@@ -1725,20 +1758,15 @@ If the installation failed on pve-cluster because of the hostname, fix
 apt -f install
 ```
 
-If pve-cluster was installed before corosync's configuration was removed,
-pmxcfs has imported it; remove it as above, then remove pmxcfs's copy in
-local mode. pmxcfs also refuses to mount on a non-empty `/etc/pve`
-("fuse: mountpoint is not empty"), which happens when something wrote there
-while it wasn't running; move such files aside (look at them first):
+pmxcfs refuses to mount on a non-empty `/etc/pve` ("fuse: mountpoint is
+not empty"), which happens when something wrote there while it wasn't
+running; move such files aside (look at them first):
 
 ```
 rc-service pve-cluster stop; pkill pmxcfs
 ls -la /etc/pve
 mkdir -p /root/etc-pve.stray
 find /etc/pve -mindepth 1 -maxdepth 1 -exec mv {} /root/etc-pve.stray/ \;
-pmxcfs -l                                  # local mode: ignores corosync.conf
-[ -e /etc/pve/corosync.conf ] && mv /etc/pve/corosync.conf /var/backups/pve-corosync.conf.devuan-default
-pkill pmxcfs
 rc-service pve-cluster start
 for s in pvedaemon pveproxy spiceproxy pvestatd pvescheduler; do rc-service $s restart; done
 pvesh get /cluster/status                  # the standalone node, online
@@ -1771,23 +1799,8 @@ REMOTE_MACHINE=root@<install machine> ./update-repo.sh --rsync --upgrade
 Without `--rsync` it copies with scp, which doesn't remove debs no longer in
 `repo/` (harmless: apt reads only the copied `Packages` index); without
 `--upgrade` it only copies, and `apt update && apt full-upgrade` is run on
-the install machine by hand.
-
-When the build adds packages, the install machine's pins (step 2) need them
-too, before the upgrade, so Proxmox's versions of them are never taken.
-frr (`frr`, `frr-*`; step 86) was added after the first installations; on
-the install machine, as root:
-
-```
-grep -q ' frr frr-\*$' /etc/apt/preferences.d/proxmox-devuan-install ||
-sed -i '/^Package: libpve-common-perl /s/$/ frr frr-*/' /etc/apt/preferences.d/proxmox-devuan-install
-grep '^Package: libpve-common-perl' /etc/apt/preferences.d/proxmox-devuan-install
-apt update
-apt-cache policy frr frr-pythontools
-```
-
-The `Package:` line must end with `ifupdown2 frr frr-*`, as in step 2;
-after the copy, frr's candidate is the `+devuan` version from `/srv/repo`.
+the install machine by hand. When the build adds packages, add them to the
+pins of step 2 first.
 
 ## Part D: testing
 

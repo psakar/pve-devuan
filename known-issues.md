@@ -138,10 +138,10 @@ and `/cluster/status` showed cluster `debian` with `node1`.
 `/cluster/status` now shows the standalone node `nb-devuan`, online. dpkg
 keeps the deleted conffile deleted on upgrades.
 
-**Note:** with corosync disabled, `pvecm create` starts corosync but
-doesn't enable it at boot; run `update-rc.d corosync enable` afterwards,
-until Proxmox's corosync build replaces Devuan's (`openrc-devuan.md`,
-Part A, corosync-pve).
+**Fixed in the build** (`openrc-devuan.md`, step 88): corosync is now
+Proxmox's, built with an init script (`pkg.corosync.lsbservice`), and it
+ships no `corosync.conf`; its init script stays enabled and doesn't start
+corosync until the node is part of a cluster.
 
 ## Node status "unknown" (2): pvestatd hangs on the QEMU CPU flag query
 
