@@ -58,7 +58,7 @@ silently and falls back to the MD5 of the SSH host key:
 (candidate `SSH MD5`). Nothing breaks, but regenerating the SSH host keys
 changes the server ID, which would invalidate a subscription key.
 
-**Worked around on this machine** on 2026-10-02 with
+**Worked around** on 2026-10-02, before the fix below, with
 `sudo dbus-uuidgen --ensure=/etc/machine-id`. The server ID is now
 `E4BF5E38F46B4461BE66249CAF70483C` (candidate `machine-id`, listed first),
 with `SSH MD5` as the second candidate. pve-manager's local check
@@ -73,8 +73,8 @@ the planned fix reuses dbus's ID.
 **Fixed** for new installations: pve-common's lsbservice build now ships a
 `pve-machine-id` init script (pve-common `1865f24`). It creates the file at
 boot and on installation if it's missing, reusing D-Bus's ID, and never
-changes an existing one. Installed here; this machine keeps its hand-made ID,
-so the mismatch with D-Bus's ID remains.
+changes an existing one. A machine worked around as above keeps its
+hand-made ID, so the mismatch with D-Bus's ID remains there.
 
 ## APT repositories view fails: Devuan's codename isn't recognized
 

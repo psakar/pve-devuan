@@ -1296,7 +1296,7 @@ expects Debian's packaged crates.
     - `build.sh` builds frr after ifupdown2; `prepare-build.sh` clones it
       as a changed repository, and the pins keep `frr` and `frr-*` from
       Proxmox's repository (pve-network recommends frr-pythontools).
-    - Not tested at runtime yet: SDN enabling and starting frr on pve2.
+    - Not tested at runtime yet: SDN enabling and starting frr.
 87. **pve-network `6e9b339`, `4cff062` (`1.6.7+devuan2`): sdn: frr: drop
     the fallback to running frrinit.sh directly.** With the init script
     from step 86, `Frr.pm` enables, starts and restarts frr through
@@ -1398,10 +1398,10 @@ expects Debian's packaged crates.
       exists (`sd_booted(3)`'s check), before touching repositories or
       packages. A runtime check: nothing changes on systemd systems.
     - Checked: `configs/` installs the drop-in only for systemd;
-      `make check`'s init-system call check passes. Not built or run yet:
-      on pve2, `pveceph install` should fail with "Ceph needs systemd as
-      init system", and `ip link show vmbr0` show the NIC's MAC address.
-### Phase 22: fixes from the first test round on pve2
+      `make check`'s init-system call check passes. Tested: `pveceph
+      install` fails with "Ceph needs systemd as init system", the drop-in
+      isn't installed, and `vmbr0` has its port's MAC address.
+### Phase 22: fixes from the first test round
 
 93. **pve-common `68a4417` (`9.2.3+devuan3`): LSBService: correct enabled
     state.** `service_enabled()` checked the sysv-rc start links with
@@ -1992,7 +1992,6 @@ In priority order. ✘ means open; the step numbers refer to Part B.
 1. Full reboot:
    - ✔ boot order (pvenetcommit → networking → pve-cluster → corosync →
      daemons → pve-guests), and guests marked to start at boot started
-     (pve2, 2026-10-08)
    - ✘ shutdown order (pve-guests stopall before daemons and lxc); the
      guests were shut down at halt, the order of the rest not checked
 2. ✘ VM lifecycle (start/stop/start via the API done, see step 76):
