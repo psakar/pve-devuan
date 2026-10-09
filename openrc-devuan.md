@@ -612,8 +612,17 @@ Build/packaging:
   firewall (datacenter/host option `nftables`, tech preview) left the node
   without a firewall: pve-firewall stops managing iptables then, and the
   daemon that takes over never started.
-- ✘ Not tested at runtime yet: the daemon at boot, its syslog output, and
-  the nftables firewall enabled (`nft list ruleset`).
+- ✔ Tested: the daemon runs from its init script;
+  with the datacenter firewall and the node's `nftables` option enabled,
+  pve-firewall clears its iptables rules and `nft list ruleset` shows the
+  `inet proxmox-firewall` table with the host rules (e.g. `iifname "eth1"
+  accept` in `host-in`).
+- ✔ Also tested: its syslog output (through proxmox-log's syslog
+  fallback, `PVE_LOG=info`), stop/start through the init script, turning
+  the firewall off again (rules removed), and guest rules: a test VM with
+  `firewall=1` on its NIC got the `bridge proxmox-firewall-guests` table
+  with its own chains (its rule, MAC/ARP spoofing protection).
+- ✘ Not tested yet: the daemon at boot.
 
 ### pve-vgpu-helper (pve-nvidia-vgpu-helper; optional, recommended)
 
