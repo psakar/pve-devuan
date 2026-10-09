@@ -2009,6 +2009,29 @@ In priority order. ✘ means open; the step numbers refer to Part B.
 7. ✘ Upgrade path: reinstall newer versions and check `invoke-rc.d`
    reload/restart from the maintainer scripts and the pve-api-updates
    trigger.
-8. ✘ Default (systemd) builds of all 12 repositories still produce the
-   same packages as master, apart from the versioned dependencies. Check on
-   a Debian trixie systemd system.
+8. Default (systemd) builds still produce upstream's packages:
+   - ✔ packages compared with `compare-default-builds.sh`: it builds each
+     repository's branch and its upstream base the same way, without the
+     lsbservice profile, and compares control fields, file lists,
+     maintainer scripts and conffiles (report in `build/compare/report.txt`).
+     18 repositories, all except proxmox-rs (no packages of its own),
+     proxmox-perl-rs (only the changelog changed) and pve-qemu (no profile).
+     - same packages: ksm-control-daemon, proxmox-kernel-helper,
+       proxmox-ve, ifupdown2, lxc, corosync-pve, proxmox-firewall,
+       pve-lxc-syscalld, frr
+     - differences, all expected:
+       - `libpve-common-perl (>= 9.2.3)` in the dependents (pve-cluster,
+         qemu-server, pve-container, pve-storage, pve-firewall,
+         pve-network, pve-manager), for the new `PVE::InitSystem` modules
+       - libpve-common-perl: the `PVE/InitSystem*` modules
+       - pve-container: `/usr/share/lxc/pve-container-supervise`, used only
+         where the `pve-container@` units don't exist
+       - maintainer scripts of pve-manager, pve-firewall and pve-ha-manager:
+         an added branch for the init scripts; the systemd code runs
+         unchanged when the systemd units exist or systemd is running
+     - changed file contents: the code changes (they go into both builds,
+       e.g. ifupdown2's `start-networking`, which keeps `--systemd` under
+       systemd), plus build dates in man pages and docs and build paths
+       in the Rust binaries
+   - ✘ install and run the default builds on a Debian trixie systemd
+     system.
