@@ -40,7 +40,7 @@ NPROC=$(nproc)
 STEPS=(
     libpve-rs-perl pve-common pve-qemu corosync-pve pve-cluster pve-firewall pve-network
     pve-storage ifupdown2 frr ksm-control-daemon lxc pve-lxc-syscalld pve-ha-manager
-    qemu-server pve-container pve-manager proxmox-default-kernel
+    qemu-server pve-container pve-manager proxmox-firewall proxmox-default-kernel
     proxmox-kernel-helper proxmox-ve
 )
 
@@ -215,6 +215,20 @@ cargo_dir_build() { # <name> <build dir> <log name>
         || die "$name failed, see build-logs/$3.log"
 }
 
+# cargo configuration using the crates of the given workspaces (e.g. the local
+# proxmox-rs, with its Devuan changes) instead of the published ones
+local_crates_patch() { # <workspace dir>...
+    local ws crate_dir name
+    echo '[patch.crates-io]'
+    for ws in "$@"; do
+        for crate_dir in "$ws"/*/; do
+            [ -f "$crate_dir/Cargo.toml" ] || continue
+            name=$(sed -n '/^\[package\]/,/^\[/s/^name *= *"\(.*\)"/\1/p' "$crate_dir/Cargo.toml" | head -1)
+            [ -n "$name" ] && echo "$name = { path = \"${crate_dir%/}\" }"
+        done
+    done
+}
+
 step_pve-common() { repo_build pve-common WITH_TESTS=1; }
 
 # libpve-rs-perl, built against the local proxmox-rs (with its Devuan
@@ -235,14 +249,7 @@ step_libpve-rs-perl() {
     make -C "$src" "libpve-rs-perl-$version" </dev/null >>"$BASE/build-logs/proxmox-perl-rs.log" 2>&1 \
         || die "preparing the libpve-rs-perl build directory failed"
     mv "$src/libpve-rs-perl-$version" "$dir"
-    {
-        echo '[patch.crates-io]'
-        for crate_dir in "$BASE"/proxmox-rs/*/ "$BASE"/proxmox-ve-rs/*/ "$BASE"/perlmod/*/; do
-            [ -f "$crate_dir/Cargo.toml" ] || continue
-            name=$(sed -n '/^\[package\]/,/^\[/s/^name *= *"\(.*\)"/\1/p' "$crate_dir/Cargo.toml" | head -1)
-            [ -n "$name" ] && echo "$name = { path = \"${crate_dir%/}\" }"
-        done
-    } > "$dir/.cargo/config.toml"
+    local_crates_patch "$BASE"/proxmox-rs "$BASE"/proxmox-ve-rs "$BASE"/perlmod > "$dir/.cargo/config.toml"
     DEB_BUILD_OPTIONS=nocheck cargo_dir_build libpve-rs-perl "$dir" proxmox-perl-rs
     cp "$BASE"/build/libpve-rs-perl*_"$version"_*.deb "$R/"
     refresh_repo
@@ -298,6 +305,32 @@ step_pve-lxc-syscalld() {
     cp "$BASE"/build/pve-lxc-syscalld*_"$version"_*.deb "$R/"
     refresh_repo
     echo "=== pve-lxc-syscalld: built $version" | tee -a "$LOG"
+    clean_build_dir "$dir"
+}
+
+# proxmox-firewall: built outside the repository like libpve-rs-perl, against
+# the local proxmox-rs (proxmox-log's syslog fallback, as there's no journald)
+# and proxmox-ve-rs crates instead of the Debian crate registry
+step_proxmox-firewall() {
+    local src=$BASE/proxmox-firewall version dir
+    build_deps "$src/debian/control" "nocheck pkg.proxmox-firewall.lsbservice" | install_some '^librust-|^dh-cargo$|^cargo$|^rustc$'
+    version=$(dpkg-parsechangelog -l "$src/debian/changelog" -S Version)
+    dir=$BASE/build/proxmox-firewall-$version
+    rm -rf "$dir" "$src/proxmox-firewall-$version"
+    make -C "$src" "proxmox-firewall-$version" </dev/null >>"$BASE/build-logs/proxmox-firewall.log" 2>&1 \
+        || die "preparing the proxmox-firewall build directory failed"
+    mv "$src/proxmox-firewall-$version" "$dir"
+    mkdir -p "$dir/.cargo"
+    local_crates_patch "$BASE"/proxmox-rs "$BASE"/proxmox-ve-rs > "$dir/.cargo/config.toml"
+    # without the Debian registry's cargo setup, the binary is built for the
+    # host, in target/release/ instead of target/<rust triple>/release/
+    sed -i 's|^target/${env:DEB_HOST_RUST_TYPE}/release/|target/release/|' \
+        "$dir/debian/proxmox-firewall.install"
+    DEB_BUILD_PROFILES="nocheck pkg.proxmox-firewall.lsbservice" DEB_BUILD_OPTIONS="nocheck parallel=$NPROC" \
+        cargo_dir_build proxmox-firewall "$dir" proxmox-firewall
+    cp "$BASE"/build/proxmox-firewall_"$version"_*.deb "$R/"
+    refresh_repo
+    echo "=== proxmox-firewall: built $version" | tee -a "$LOG"
     clean_build_dir "$dir"
 }
 

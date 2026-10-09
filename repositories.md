@@ -60,7 +60,7 @@ proxmox-acme (acme.sh submodule for the DNS plugins), pve-xtermjs (xterm.js
 packaging next to its own termproxy), proxmox-backup-qemu (proxmox-backup
 submodule). All other repositories listed below are Proxmox's own code.
 
-## 1. Changed for the init system (19)
+## 1. Changed for the init system (20)
 
 Packages built from them are installed here: with their `pkg.<source>.lsbservice`
 profile where they have one, pve-qemu with a local `+devuan1` version, and
@@ -85,6 +85,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 | ksm-control-daemon | `ksm-control-daemon` | ksm-control-daemon | ksm-control-daemon | 2 |
 | proxmox-kernel-helper | `proxmox-kernel-helper` | proxmox-kernel-helper | proxmox-kernel-helper | 3 |
 | proxmox-ve | `proxmox-ve` | proxmox-ve | proxmox-ve | 2 |
+| proxmox-firewall | `proxmox-firewall` | proxmox-firewall | proxmox-firewall (proxmox-firewall-data, from its `proxmox-firewall-data/` directory, stays Proxmox's) | 2 |
 | pve-qemu | `pve-qemu` | pve-qemu-kvm | pve-qemu-kvm (11.0.3-4+devuan1); branch from `stable-11.0` at `7fccdcf` | 2 |
 | proxmox-rs | `proxmox-rs` | Rust crates (`proxmox-apt`, `proxmox-apt-api-types`, `proxmox-log`, …) | compiled into libpve-rs-perl, see section 2 | 5 |
 
@@ -130,7 +131,6 @@ repositories) is downloaded by `build.sh`'s last step into `repo/` instead.
 | pve-docs | `deps/pve-docs` | pve-docs, pve-doc-generator | |
 | proxmox-mail-forward | `deps/proxmox-mail-forward` | proxmox-mail-forward | |
 | proxmox-enterprise-support | `deps/proxmox-enterprise-support` | proxmox-enterprise-support-keyring | |
-| proxmox-firewall | `proxmox-firewall` | proxmox-firewall-data | the `proxmox-firewall` daemon (unit only) isn't installed |
 | proxmox-ve-rs | `proxmox-ve-rs` | proxmox-frr-templates | |
 | ceph | `ceph` | ceph-common, ceph-fuse, librados2, librbd1, libcephfs2, python3-ceph* … (19.2 libs) | **out of scope**; installed only as library dependencies; Ceph daemons ship systemd units only |
 | zfsonlinux | `zfsonlinux` | zfsutils-linux, libzfs7linux, libzpool7linux, libnvpair3linux, libuutil3linux | **out of scope**; installed as dependencies; ships systemd units only, so no ZFS pool import/mount at boot (see `known-issues.md`) |
