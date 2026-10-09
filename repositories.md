@@ -68,11 +68,11 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 
 | Repository | Path | Source package | Binary packages used | Commits on branch |
 |---|---|---|---|---|
-| pve-common | `pve-common` | libpve-common-perl | libpve-common-perl | 24 |
+| pve-common | `pve-common` | libpve-common-perl | libpve-common-perl | 25 |
 | pve-manager | `pve-manager` | pve-manager | pve-manager | 27 |
 | pve-cluster | `pve-cluster` | pve-cluster | pve-cluster, libpve-cluster-perl, libpve-cluster-api-perl, libpve-notify-perl | 6 |
 | pve-ha-manager | `pve-ha-manager` | pve-ha-manager | pve-ha-manager | 9 |
-| qemu-server | `qemu-server` | qemu-server | qemu-server | 7 |
+| qemu-server | `qemu-server` | qemu-server | qemu-server | 9 |
 | pve-container | `pve-container` | pve-container | pve-container | 5 |
 | pve-storage | `pve-storage` | libpve-storage-perl | libpve-storage-perl | 4 |
 | pve-firewall | `pve-firewall` | pve-firewall | pve-firewall | 6 |
