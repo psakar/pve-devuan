@@ -73,7 +73,7 @@ proxmox-rs as the source of the Rust crates compiled into libpve-rs-perl.
 | pve-cluster | `pve-cluster` | pve-cluster | pve-cluster, libpve-cluster-perl, libpve-cluster-api-perl, libpve-notify-perl | 6 |
 | pve-ha-manager | `pve-ha-manager` | pve-ha-manager | pve-ha-manager | 9 |
 | qemu-server | `qemu-server` | qemu-server | qemu-server | 7 |
-| pve-container | `pve-container` | pve-container | pve-container | 3 |
+| pve-container | `pve-container` | pve-container | pve-container | 5 |
 | pve-storage | `pve-storage` | libpve-storage-perl | libpve-storage-perl | 4 |
 | pve-firewall | `pve-firewall` | pve-firewall | pve-firewall | 6 |
 | pve-network | `pve-network` | libpve-network-perl | libpve-network-perl, libpve-network-api-perl | 7 |

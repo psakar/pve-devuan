@@ -267,6 +267,13 @@ Build/packaging:
   `libpve-common-perl (>= 9.2.3)` (43).
 - ✔ `pkg.pve-container.lsbservice`: no `pve-container@`/`-debug@` units or
   slice, no `dh_installsystemd` (44).
+- ✔ Tested (Debian 13 unprivileged container, Part D test 3): start
+  (supervisor → `lxc-start -F` → the container's init, in `lxc/<vmid>`),
+  `pct stop`, `pct shutdown`, `pct reboot`, reboot and poweroff from within
+  (the supervisor restarts the container, or exits), debug start; the
+  cgroups `lxc/<vmid>` and `lxc.monitor/<vmid>` are removed on stop.
+- ✔ The supervisor runs in its own cgroup,
+  `pve.slice/pve-container.slice/<vmid>.scope`, not its caller's (97).
 
 ### pve-storage (libpve-storage-perl)
 
@@ -595,8 +602,9 @@ Build/packaging:
   installs `ksmtuned.init` as `/etc/init.d/ksmtuned` instead of the unit
   (89). Proxmox's `init-script.diff` had already adapted the upstream Red
   Hat-style script to LSB, but nothing installed it.
-- ✘ Not tested at runtime yet: ksmtuned at boot, KSM starting under memory
-  pressure (`/sys/kernel/mm/ksm/run`).
+- ✔ ksmtuned starts at boot.
+- ✘ Not tested at runtime yet: KSM starting under memory pressure
+  (`/sys/kernel/mm/ksm/run`).
 
 ### proxmox-firewall (optional, recommended by pve-manager)
 
@@ -622,7 +630,7 @@ Build/packaging:
   the firewall off again (rules removed), and guest rules: a test VM with
   `firewall=1` on its NIC got the `bridge proxmox-firewall-guests` table
   with its own chains (its rule, MAC/ARP spoofing protection).
-- ✘ Not tested yet: the daemon at boot.
+- ✔ Tested: the daemon starts at boot.
 
 ### pve-vgpu-helper (pve-nvidia-vgpu-helper; optional, recommended)
 
@@ -1453,6 +1461,24 @@ expects Debian's packaged crates.
       start/stop checked with the built daemon (as a user, without
       `/etc/pve`).
 
+### Phase 24: fixes from the second test round
+
+97. **pve-container `bde572b`, `44e3515` (`6.1.14+devuan2`):
+    `pve-container-supervise` runs in its own cgroup.** It stayed in its
+    caller's (a login session, `openrc.pvedaemon` or `openrc.pve-guests`),
+    so stopping that service with OpenRC's `rc_cgroup_cleanup="YES"`, or
+    logging out with elogind's `KillUserProcesses=yes`, would have killed
+    the running containers with it. It now enters the resource scope
+    `pve-container.slice/<vmid>.scope` through `PVE::InitSystem` (the
+    dash nests it in `pve.slice`); lxc-start inherits it and moves on to
+    `lxc.monitor/<vmid>`, the container stays in `lxc/<vmid>`. On exit it
+    moves to the root cgroup and removes the empty scope. Tested with a
+    container: the scope holds only the supervisor, also across a reboot
+    from within, and is gone after stop. The post-stop hook's "Script
+    exited with status 1" in `/run/pve/ct-<vmid>.stderr` after a reboot
+    from within is upstream's: the hook makes lxc stop instead of reboot,
+    so that the container is started again with the current config.
+
 Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 `proxmox-rs/init-system-rework.md` (untracked in proxmox-rs).
 
@@ -1465,7 +1491,7 @@ Not committed: `proxmox-rs/systemd-usage-analysis.md` and
 | pve-cluster | `7091d92e` | 18, 21, 22, 26, 52, 79 |
 | pve-ha-manager | `28c31e41` | 19, 23, 24, 27, 28, 54, 79–81 |
 | qemu-server | `a7b4240b` | 36, 39–41, 55, 63, 79 |
-| pve-container | `de0ddd65` | 43, 44, 79 |
+| pve-container | `de0ddd65` | 43, 44, 79, 97 |
 | pve-storage | `f1a6ef43` | 46–48, 79 |
 | pve-firewall | `9480dd17` | 49, 50, 53, 79–81 |
 | pve-network | `ce388c5e` | 57, 58, 60, 66, 79, 87 |
@@ -1992,14 +2018,16 @@ In priority order. ✘ means open; the step numbers refer to Part B.
 1. Full reboot:
    - ✔ boot order (pvenetcommit → networking → pve-cluster → corosync →
      daemons → pve-guests), and guests marked to start at boot started
-   - ✘ shutdown order (pve-guests stopall before daemons and lxc); the
-     guests were shut down at halt, the order of the rest not checked
+   - ✔ shutdown order: pvescheduler → pve-guests stopall (guests shut
+     down) → pve-ha-lrm → pve-ha-crm → spiceproxy → pvestatd → pveproxy →
+     pvedaemon → pve-firewall → pvefw-logger → pve-cluster
 2. ✘ VM lifecycle (start/stop/start via the API done, see step 76):
    - start/stop/reboot (scope in `qemu.slice`)
    - CPU limit hotplug (step 36)
    - leftover scope cleanup (39)
    - migration with conntrack state (40)
-3. ✘ Container lifecycle: start, stop, reboot from within (43), debug start.
+3. ✔ Container lifecycle: start, stop, shutdown, `pct reboot`, reboot and
+   poweroff from within (43), debug start (see pve-container in Part A).
 4. ✘ Directory storage creation and removal (fstab entry, mount at boot;
    steps 45, 47).
 5. ✘ SDN with DHCP:
