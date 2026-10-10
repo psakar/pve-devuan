@@ -270,12 +270,14 @@ EOF
 
     cat > "$A/apt.sh" <<'EOF'
 #!/bin/sh
-# apt-get with the private configuration (system dpkg status, own sources and cache)
+# apt-get with the private configuration (system dpkg status, own sources and cache);
+# the package lists uncompressed, as fetch-proxmox.sh and build.sh read them
+# (e.g. Docker's Debian-style images set Acquire::GzipIndexes)
 A=$(cd "$(dirname "$0")" && pwd)
 exec apt-get -o Dir::Etc::SourceList=$A/etc/sources.list -o Dir::Etc::SourceParts=$A/empty \
     -o Dir::Etc::Preferences=$A/etc/preferences -o Dir::Etc::PreferencesParts=$A/empty \
     -o Dir::State::Lists=$A/state/lists -o Dir::Cache=$A/cache -o Dir::Cache::Archives=$A/cache/archives \
-    -o Debug::NoLocking=1 "$@"
+    -o Acquire::GzipIndexes=false -o Debug::NoLocking=1 "$@"
 EOF
 
     cat > "$P/fetch-proxmox.sh" <<'EOF'

@@ -15,13 +15,20 @@
 #   pve-cluster: its build needs libpve-access-control, which depends on it
 #   pve-network: its build needs pve-firewall, which depends on it
 #
-# Usage: build.sh [--from <step>] [--only <step>] [--keep] [--install] [--list]
+# Usage: build.sh [--from <step>] [--only <step>[,<step>...]] [--keep] [--install]
+#                 [--list] [--sources <step>]
 #   --from <step>  start at this step (e.g. to resume after a failure)
-#   --only <step>  build only this step
+#   --only <steps> build only these steps (comma-separated, or the option
+#                  repeated), in build order
 #   --keep         keep the build directories; by default a step removes them
 #                  once its packages are in repo/ (a failed step keeps them)
 #   --install      install pve-manager (and so everything) afterwards
 #   --list         list the steps
+#   --sources <step>
+#                  print the step's changelog (whose version its packages get)
+#                  and the repositories it's built from, e.g. to decide whether
+#                  it needs rebuilding (select-steps.sh); proxmox-default-kernel
+#                  has neither, its packages come from Proxmox
 #
 # Versions come from the repositories' debian/changelog (+devuan<N>); bump them
 # for a rebuild with changes, apt doesn't replace a package with another one of
@@ -44,21 +51,42 @@ STEPS=(
     proxmox-kernel-helper proxmox-ve
 )
 
-FROM='' ONLY='' INSTALL=0 KEEP=0
+# The repositories a step is built from, if not just the one named like it:
+# libpve-rs-perl and proxmox-firewall also use the local crates (see
+# local_crates_patch); proxmox-default-kernel is downloaded from Proxmox
+declare -A STEP_SOURCES=(
+    [libpve-rs-perl]="proxmox-perl-rs proxmox-rs proxmox-ve-rs perlmod"
+    [proxmox-firewall]="proxmox-firewall proxmox-rs proxmox-ve-rs"
+    [proxmox-default-kernel]=""
+)
+declare -A STEP_CHANGELOG=(
+    [libpve-rs-perl]=proxmox-perl-rs/pve-rs/debian/changelog
+    [proxmox-default-kernel]=""
+)
+step_sources() { echo "${STEP_SOURCES[$1]-$1}"; }
+step_changelog() { echo "${STEP_CHANGELOG[$1]-$1/debian/changelog}"; }
+is_step() { printf '%s\n' "${STEPS[@]}" | grep -qxF "$1"; }
+
+FROM='' ONLY=() INSTALL=0 KEEP=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --from) FROM=$2; shift ;;
-        --only) ONLY=$2; shift ;;
+        --only) IFS=', ' read -ra steps <<<"$2"; ONLY+=("${steps[@]}"); shift ;;
         --install) INSTALL=1 ;;
         --keep) KEEP=1 ;;
         --list) printf '%s\n' "${STEPS[@]}"; exit 0 ;;
+        --sources)
+            is_step "$2" || { echo "unknown step '$2', see --list" >&2; exit 2; }
+            echo "changelog: $(step_changelog "$2")"
+            echo "repositories: $(step_sources "$2")"
+            exit 0 ;;
         -h|--help) sed -n '3,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
         *) echo "unknown option '$1', see --help" >&2; exit 2 ;;
     esac
     shift
 done
-for s in "$FROM" "$ONLY"; do
-    if [ -n "$s" ] && ! printf '%s\n' "${STEPS[@]}" | grep -qxF "$s"; then
+for s in "$FROM" "${ONLY[@]}"; do
+    if [ -n "$s" ] && ! is_step "$s"; then
         echo "unknown step '$s', see --list" >&2; exit 2
     fi
 done
@@ -419,7 +447,9 @@ started=0
 for step in "${STEPS[@]}"; do
     [ "$step" = "$FROM" ] && started=1
     [ $started = 1 ] || continue
-    [ -n "$ONLY" ] && [ "$step" != "$ONLY" ] && continue
+    if [ ${#ONLY[@]} -gt 0 ] && ! printf '%s\n' "${ONLY[@]}" | grep -qxF "$step"; then
+        continue
+    fi
     info "$(date -Is) step $step"
     "step_$step"
 done

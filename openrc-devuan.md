@@ -1582,6 +1582,15 @@ to work in:
   `apt update && apt full-upgrade` there (see "Installing on another
   machine").
 
+For publishing, the GitHub Actions workflow `.github/workflows/build-repo.yml`
+builds the same way in a Devuan container and releases `repo/` as a signed
+tarball, with two more scripts (see "Building with GitHub Actions"):
+
+- `select-steps.sh` decides which `build.sh` steps an incremental build
+  runs, and records what was built in `repo/SOURCES`.
+- `package-repo.sh` removes older package versions from `repo/`, signs it
+  (`Release`, `InRelease`, `Release.gpg`) and packs it.
+
 The sections below describe what they do.
 
 ### Environment
@@ -1732,6 +1741,87 @@ Each package is built after its build dependencies are installed.
     **proxmox-ve** (`pkg.proxmox-ve.lsbservice`), after downloading
     Proxmox's kernel.
 
+### Building with GitHub Actions
+
+The workflow `.github/workflows/build-repo.yml` in this repository
+(`psakar/pve-devuan`), started by hand (Actions → Build repository → Run
+workflow), builds incrementally and publishes the repository as a release
+`repo-<date>-<run>` with `pve-devuan-repo-<tag>.tar.gz` and its signature
+`.tar.gz.asc`.
+
+- **What gets built** (input `steps`):
+  - `auto` (default): the steps whose source repositories' commits differ
+    from the last release's `SOURCES`, or that it doesn't list, plus
+    `proxmox-default-kernel` (Proxmox's current kernel, downloaded). Which
+    repositories a step is built from: `build.sh --sources <step>` (e.g.
+    libpve-rs-perl also from proxmox-rs, proxmox-ve-rs and perlmod).
+  - `all`, or step names, comma-separated (e.g. `pve-common,qemu-server`).
+  - Dependent packages aren't rebuilt: the Perl packages don't need it, and
+    the C libraries built here (corosync's, lxc's) keep their ABI within a
+    version.
+  - Bump the changelog with each change (`+devuan<N>`): a rebuild with an
+    unchanged version gets a warning, apt wouldn't upgrade to it.
+- **How:** the `build` job restores the last release's tarball into `repo/`
+  (after checking its signature against `keys/pve-devuan-repo.asc`; input
+  `fresh` starts from an empty one instead), then runs
+  `ci/build-in-container.sh` in `devuan/devuan:excalibur`: a build user with
+  passwordless sudo (like the build machine's `test`), `prepare-build.sh`,
+  `select-steps.sh`, `build.sh --only <steps>`, the record in
+  `repo/SOURCES`, and `package-repo.sh --prune`. The `release` job, in the
+  GitHub environment `release` (the only one with the signing key), signs
+  and packs `repo/` and creates the release, with the built steps and
+  `SOURCES` in its notes. Nothing changed (e.g. `auto` without changes and
+  no newer kernel): no release. Build logs: the run's artifact
+  `build-logs`.
+- **Limits:** a hosted runner (4 CPUs) may run a job for 6 hours at most. A
+  build of everything (the first run, `all`, or `fresh`) may exceed that
+  with pve-qemu; the release can instead be started from the build
+  machine's `repo/`, see below.
+
+**Trying the container build locally** with podman (rootless), in a
+separate directory with the scripts (and, for an incremental build, the
+last release's packages in `repo/`):
+
+```
+mkdir -p ~/ci-test/repo && cp -a build.sh prepare-build.sh select-steps.sh package-repo.sh ci ~/ci-test/
+cd ~/ci-test
+podman run --rm --userns=keep-id --user root -v "$PWD:/work:Z" -e STEPS=auto -e BUILD_UID="$(id -u)" \
+    docker.io/devuan/devuan:excalibur /work/ci/build-in-container.sh 2>&1 | tee ci.log
+```
+
+The result is in `repo/` and `build/ci/` (`steps`, `changed`).
+
+**Signing key.** A signing subkey of your key, so that the primary key stays
+off GitHub; apt and `gpgv` verify against the public key:
+
+```
+gpg --quick-add-key <primary key fingerprint> ed25519 sign 2y
+gpg --list-keys --with-subkey-fingerprints <primary key fingerprint>
+# the new subkey: [S], note its fingerprint
+gpg --armor --export-secret-subkeys <subkey fingerprint>! > signing-subkey.asc
+gpg --armor --export <primary key fingerprint> > keys/pve-devuan-repo.asc
+```
+
+`keys/pve-devuan-repo.asc` is committed. The exported subkey keeps the
+key's passphrase. In the repository settings on GitHub, create the
+environment `release` (Settings → Environments; required reviewers
+optional) with two secrets, then delete the exported file:
+
+```
+gh secret set GPG_SIGNING_KEY --env release --repo psakar/pve-devuan < signing-subkey.asc
+gh secret set GPG_PASSPHRASE --env release --repo psakar/pve-devuan
+shred -u signing-subkey.asc
+```
+
+**The first release from the build machine** (instead of a full build on
+GitHub): after `build.sh`, with the key on the build machine:
+
+```
+./select-steps.sh record repo/SOURCES $(./build.sh --list)
+./package-repo.sh --prune --sign '<subkey fingerprint>!' --tarball dist/pve-devuan-repo-repo-<date>.tar.gz
+gh release create repo-<date> dist/* --repo psakar/pve-devuan --title repo-<date> --notes 'Built on the build machine'
+```
+
 ### Installation
 
 1. Prepare the system:
@@ -1812,7 +1902,29 @@ it must keep these lines too.
 #### 1. The local repository
 
 Create `/srv/repo`, owned by the `_apt` user (apt reads local repositories
-as `_apt`), with the build machine's `repo/`, including its
+as `_apt`), with the packages built: either a signed release from GitHub
+(see "Building with GitHub Actions"), or the build machine's `repo/`.
+
+**From a release** (signed): the public key, the tarball and its signature
+(`<tag>`: the release, e.g. from `https://github.com/psakar/pve-devuan/releases`):
+
+```
+apt install gpgv
+wget https://raw.githubusercontent.com/psakar/pve-devuan/main/keys/pve-devuan-repo.asc \
+    -O /usr/share/keyrings/pve-devuan-repo.asc
+gpg --show-keys /usr/share/keyrings/pve-devuan-repo.asc   # check the fingerprint
+wget https://github.com/psakar/pve-devuan/releases/download/<tag>/pve-devuan-repo-<tag>.tar.gz \
+    https://github.com/psakar/pve-devuan/releases/download/<tag>/pve-devuan-repo-<tag>.tar.gz.asc
+gpg --dearmor < /usr/share/keyrings/pve-devuan-repo.asc > /tmp/pve-devuan-repo.gpg
+gpgv --keyring /tmp/pve-devuan-repo.gpg pve-devuan-repo-<tag>.tar.gz.asc pve-devuan-repo-<tag>.tar.gz
+mkdir -p /srv/repo
+tar -xzf pve-devuan-repo-<tag>.tar.gz -C /srv/repo
+chown -R _apt:root /srv/repo
+```
+
+Then use the signed sources entry in step 2.
+
+**From the build machine** (unsigned): its `repo/`, including
 `Packages`/`Packages.gz`. For example, with the build in `~test/proxmox` on
 the build machine:
 
@@ -1861,7 +1973,13 @@ EOF
 ```
 
 The local repository is flat (suite `./`, no components) and unsigned
-(`Trusted: yes`); apt 3 notes "Missing Signed-By" for it, harmless.
+(`Trusted: yes`); apt 3 notes "Missing Signed-By" for it, harmless. With a
+signed release in `/srv/repo` (step 1), apt checks it instead: in its
+entry, replace `Trusted: yes` by
+
+```
+Signed-By: /usr/share/keyrings/pve-devuan-repo.asc
+```
 
 The pins, the same as the build's private fetch configuration
 (`prepare-build.sh`):
@@ -2037,7 +2155,17 @@ As in step 4 of the installation above.
 
 #### 6. Updating after a rebuild
 
-On the build machine, after `build.sh`, copy the new `repo/` and upgrade:
+From a newer release: download and check it as in step 1, replace
+`/srv/repo`'s content with it, and upgrade:
+
+```
+rm -f /srv/repo/*
+tar -xzf pve-devuan-repo-<tag>.tar.gz -C /srv/repo
+chown -R _apt:root /srv/repo
+apt update && apt full-upgrade
+```
+
+From the build machine, after `build.sh`, copy the new `repo/` and upgrade:
 
 ```
 REMOTE_MACHINE=root@<install machine> ./update-repo.sh --rsync --upgrade

@@ -1,0 +1,158 @@
+# Build the Proxmox VE packages for Devuan into a signed apt repository and
+# publish it as a release (pve-devuan-repo-<tag>.tar.gz, with a detached
+# signature). Incremental: starts from the last release's repository and
+# rebuilds only what changed (see select-steps.sh); see openrc-devuan.md,
+# "Building with GitHub Actions".
+#
+# Needs the environment 'release' with the secrets GPG_SIGNING_KEY (an armored
+# export of the signing subkey: gpg --armor --export-secret-subkeys <id>!) and
+# GPG_PASSPHRASE, and the public key in keys/pve-devuan-repo.asc.
+
+name: Build repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: >-
+          What to build: 'auto' (what changed since the last release), 'all', or
+          build.sh steps, comma-separated (e.g. pve-common,qemu-server)
+        required: true
+        default: auto
+      fresh:
+        description: Start from an empty repository instead of the last release's
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-repo
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    outputs:
+      steps: ${{ steps.result.outputs.steps }}
+      changed: ${{ steps.result.outputs.changed }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+              /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - name: Restore the last release's repository
+        if: ${{ !inputs.fresh }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p repo
+          if ! tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null); then
+            echo "no release yet, starting from an empty repository"
+            exit 0
+          fi
+          echo "restoring $tag"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir dl \
+              --pattern 'pve-devuan-repo-*.tar.gz' --pattern 'pve-devuan-repo-*.tar.gz.asc'
+          gpg --dearmor < keys/pve-devuan-repo.asc > dl/keyring.gpg
+          gpgv --keyring "$PWD/dl/keyring.gpg" dl/pve-devuan-repo-*.tar.gz.asc dl/pve-devuan-repo-*.tar.gz
+          tar -xzf dl/pve-devuan-repo-*.tar.gz -C repo
+          # signed again on release
+          rm -rf dl repo/Release repo/InRelease repo/Release.gpg
+
+      - name: Build in Devuan excalibur
+        env:
+          STEPS: ${{ inputs.steps }}
+        run: |
+          docker run --rm -v "$PWD:/work" -e STEPS -e BUILD_UID="$(id -u)" -e GITHUB_ACTIONS \
+              devuan/devuan:excalibur /work/ci/build-in-container.sh
+
+      - name: Result
+        id: result
+        run: |
+          echo "steps=$(cat build/ci/steps)" >> "$GITHUB_OUTPUT"
+          echo "changed=$(cat build/ci/changed)" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Built: $(cat build/ci/steps | sed 's/^$/nothing/')"
+            echo "Repository changed: $(cat build/ci/changed)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the repository
+        if: steps.result.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo
+          path: |
+            repo/*.deb
+            repo/Packages
+            repo/Packages.gz
+            repo/SOURCES
+          retention-days: 7
+
+      - name: Upload the build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build-logs/
+          retention-days: 14
+
+  release:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: repo
+          path: repo
+
+      - name: Import the signing key
+        env:
+          GPG_SIGNING_KEY: ${{ secrets.GPG_SIGNING_KEY }}
+        run: |
+          gpg --batch --import <<<"$GPG_SIGNING_KEY"
+          # the secret subkey with signing capability (the primary key isn't there)
+          key=$(gpg --list-secret-keys --with-colons \
+              | awk -F: '$1 == "ssb" { s = ($12 ~ /s/) } $1 == "fpr" && s { print $10; exit }')
+          [ -n "$key" ] || { echo "no signing subkey in GPG_SIGNING_KEY" >&2; exit 1; }
+          echo "SIGNING_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Sign and pack
+        env:
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          sudo apt-get install -y -q apt-utils >/dev/null
+          tag=repo-$(date -u +%Y%m%d-%H%M)-${GITHUB_RUN_NUMBER}
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          ./package-repo.sh --sign "$SIGNING_KEY!" --tarball "dist/pve-devuan-repo-$tag.tar.gz" repo
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILT: ${{ needs.build.outputs.steps }}
+        run: |
+          {
+            echo "Proxmox VE for Devuan 6 excalibur (sysvinit/OpenRC): signed apt repository."
+            echo
+            echo "Built in this run: ${BUILT:-nothing}"
+            echo
+            echo "Sources (step, version, repository commits):"
+            echo '```'
+            cat repo/SOURCES
+            echo '```'
+          } > notes.md
+          gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" \
+              --title "$TAG" --notes-file notes.md --target "$GITHUB_SHA"

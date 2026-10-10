@@ -32,3 +32,5 @@
 /ui/
 /zfsonlinux/
 /repo-proxmox/
+/dist/
+/dl/
